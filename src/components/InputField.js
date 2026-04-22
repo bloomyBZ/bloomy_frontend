@@ -1,0 +1,126 @@
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { colors, radii } from '../theme';
+
+export default function InputField({
+  label,
+  placeholder,
+  defaultValue,
+  secure = false,
+  keyboardType = 'default',
+  prefix,
+  right = 'check',
+  style,
+}) {
+  return (
+    <View style={[styles.wrap, style]}>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
+      <View style={styles.inputShell}>
+        {prefix ? <Text style={styles.prefix}>{prefix}</Text> : null}
+        <TextInput
+          defaultValue={defaultValue}
+          placeholder={placeholder}
+          placeholderTextColor="#97918E"
+          secureTextEntry={secure}
+          keyboardType={keyboardType}
+          style={styles.input}
+        />
+        {right === 'check' ? (
+          <CheckIcon />
+        ) : null}
+        {right === 'eye' ? <EyeIcon /> : null}
+      </View>
+    </View>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <View style={styles.check}>
+      <View style={styles.checkStem} />
+      <View style={styles.checkArm} />
+    </View>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <View style={styles.eye}>
+      <View style={styles.eyeDot} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    gap: 7,
+  },
+  label: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  inputShell: {
+    height: 52,
+    borderRadius: radii.input,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+  },
+  prefix: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '700',
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 15,
+    paddingVertical: 0,
+    letterSpacing: 0,
+  },
+  check: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.green,
+  },
+  checkStem: {
+    position: 'absolute',
+    width: 5,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#FFFFFF',
+    transform: [{ translateX: -2 }, { translateY: 1 }, { rotate: '45deg' }],
+  },
+  checkArm: {
+    position: 'absolute',
+    width: 9,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#FFFFFF',
+    transform: [{ translateX: 2 }, { rotate: '-45deg' }],
+  },
+  eye: {
+    width: 20,
+    height: 13,
+    borderWidth: 1.5,
+    borderColor: colors.soft,
+    borderRadius: 10,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eyeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.soft,
+  },
+});
