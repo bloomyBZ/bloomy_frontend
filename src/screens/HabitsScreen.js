@@ -1,122 +1,420 @@
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AddHabitSheet from '../components/AddHabitSheet';
 import PageLayout from '../components/PageLayout';
 import { SmallActionButton } from '../components/Button';
+import { DailyHydrationRow, WeeklyHydration } from '../components/HydrationTracker';
 import {
-  DailyHydrationRow,
+  DEFAULT_WATER_CUPS,
   WATER_GOAL,
-  WeeklyHydration,
-} from '../components/HydrationTracker';
-import { getAvailableXp, getCompletedCount, getEarnedXp } from '../data/habits';
+  formatHabitDate,
+  formatRelativeHabitDate,
+  getAvailableXp,
+  getCompletedCount,
+  getDateKey,
+  getEarnedXp,
+  getHabitDayLabel,
+  getHabitDayNumber,
+  parseDateKey,
+  shiftDate,
+} from '../data/habits';
 import { colors, radii, shadow } from '../theme';
 
+const filters = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'done', label: 'Done' },
+];
+
 export default function HabitsScreen({
-  habits,
-  onToggleHabit,
-  onSetHabitChecked,
+  habitHistory,
+  todayKey,
+  onAddHabit,
+  onDeleteHabit,
+  onSetHabitValues,
   onTabPress,
 }) {
+  const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
+  const [selectedFilter, setSelectedFilter] = useState('all');
+  const [composerVisible, setComposerVisible] = useState(false);
+  const [celebrationTarget, setCelebrationTarget] = useState(null);
+  const dateSliderRef = useRef(null);
+
+  const dateOptions = useMemo(
+    () =>
+      Object.keys(habitHistory)
+        .sort((first, second) => first.localeCompare(second))
+        .map((dateKey) => ({
+          key: dateKey,
+          dayLabel: getHabitDayLabel(dateKey),
+          dayNumber: getHabitDayNumber(dateKey),
+          relativeLabel: formatRelativeHabitDate(dateKey, todayKey),
+        })),
+    [habitHistory, todayKey]
+  );
+
+  useEffect(() => {
+    if (!habitHistory[selectedDateKey] && habitHistory[todayKey]) {
+      setSelectedDateKey(todayKey);
+    }
+  }, [habitHistory, selectedDateKey, todayKey]);
+
+  const habits = habitHistory[selectedDateKey] ?? habitHistory[todayKey] ?? [];
   const waterHabit = habits.find((habit) => habit.id === 'water');
-  const [waterCups, setWaterCups] = useState(waterHabit?.checked ? WATER_GOAL : 2);
+  const waterCups =
+    waterHabit?.cups ?? (waterHabit?.checked ? WATER_GOAL : DEFAULT_WATER_CUPS);
   const completedCount = getCompletedCount(habits);
   const earnedXp = getEarnedXp(habits);
   const availableXp = getAvailableXp(habits);
-  const weeklyHydration = useMemo(
-    () => [2, 6, 3, 2, 6, 6, waterCups],
-    [waterCups]
-  );
+  const selectedDateTitle = formatHabitDate(selectedDateKey);
+  const selectedDateMeta = formatRelativeHabitDate(selectedDateKey, todayKey);
+  const filteredHabits = useMemo(() => {
+    if (selectedFilter === 'active') {
+      return habits.filter((habit) => !habit.checked);
+    }
+
+    if (selectedFilter === 'done') {
+      return habits.filter((habit) => habit.checked);
+    }
+
+    return habits;
+  }, [habits, selectedFilter]);
+  const sectionMetaLabel =
+    selectedFilter === 'all'
+      ? `${filteredHabits.length} habits`
+      : `${filteredHabits.length} ${selectedFilter} habits`;
+
+  const weeklyWindow = useMemo(() => {
+    const anchorDate = parseDateKey(selectedDateKey);
+
+    return Array.from({ length: 7 }).map((_, index) => {
+      const dateKey = getDateKey(shiftDate(anchorDate, index - 6));
+      const dayWaterHabit = habitHistory[dateKey]?.find((habit) => habit.id === 'water');
+
+      return {
+        label: getHabitDayLabel(dateKey).charAt(0),
+        cups: dayWaterHabit
+          ? dayWaterHabit.cups ??
+            (dayWaterHabit.checked ? WATER_GOAL : DEFAULT_WATER_CUPS)
+          : 0,
+      };
+    });
+  }, [habitHistory, selectedDateKey]);
+
+  const triggerCelebration = (habitId) => {
+    setCelebrationTarget({
+      dateKey: selectedDateKey,
+      habitId,
+      token: Date.now(),
+    });
+  };
+
+  const handleToggleHabit = (habit) => {
+    if (habit.id === 'water') {
+      const checked = !habit.checked;
+      const cups = checked ? WATER_GOAL : DEFAULT_WATER_CUPS;
+
+      if (!habit.checked && checked) {
+        triggerCelebration(habit.id);
+      }
+
+      onSetHabitValues(selectedDateKey, habit.id, {
+        checked,
+        cups,
+        progress: Math.round((cups / WATER_GOAL) * 100),
+        streak: checked ? habit.streak + 1 : Math.max(1, habit.streak - 1),
+      });
+
+      return;
+    }
+
+    const checked = !habit.checked;
+
+    if (!habit.checked && checked) {
+      triggerCelebration(habit.id);
+    }
+
+    onSetHabitValues(selectedDateKey, habit.id, {
+      checked,
+      progress: checked ? 100 : Math.max(20, habit.progress - 35),
+      streak: checked ? habit.streak + 1 : Math.max(1, habit.streak - 1),
+    });
+  };
 
   const handleWaterChange = (nextCups) => {
-    setWaterCups(nextCups);
-    onSetHabitChecked('water', nextCups >= WATER_GOAL);
+    const nextChecked = nextCups >= WATER_GOAL;
+    let nextStreak = waterHabit?.streak ?? 1;
+
+    if (!waterHabit?.checked && nextChecked) {
+      nextStreak += 1;
+      triggerCelebration('water');
+    }
+
+    if (waterHabit?.checked && !nextChecked) {
+      nextStreak = Math.max(1, nextStreak - 1);
+    }
+
+    onSetHabitValues(selectedDateKey, 'water', {
+      cups: nextCups,
+      checked: nextChecked,
+      progress: Math.round((nextCups / WATER_GOAL) * 100),
+      streak: nextStreak,
+    });
+  };
+
+  const handleAddHabit = (draft) => {
+    onAddHabit?.(selectedDateKey, draft);
+    setComposerVisible(false);
+  };
+  const handleDeleteHabit = (habitId) => {
+    setCelebrationTarget((current) =>
+      current?.dateKey === selectedDateKey && current?.habitId === habitId
+        ? null
+        : current
+    );
+    onDeleteHabit?.(selectedDateKey, habitId);
   };
 
   return (
-    <PageLayout
-      title="Habits"
-      subtitle="Manage today's routine"
-      activeTab="habits"
-      onTabPress={onTabPress}
-      scroll
-      contentStyle={styles.content}
-    >
-      <WeeklyHydration values={weeklyHydration} />
+    <>
+      <PageLayout
+        title="Habits"
+        subtitle={selectedDateTitle}
+        activeTab="habits"
+        onTabPress={onTabPress}
+        scroll
+        contentStyle={styles.content}
+      >
+        <View style={styles.dateCard}>
+          <Text style={styles.dateEyebrow}>Habit history</Text>
+          <Text style={styles.dateTitle}>{selectedDateTitle}</Text>
+          <Text style={styles.dateBody}>
+            {selectedDateMeta} selected. Slide through earlier days to compare your
+            routine.
+          </Text>
 
-      <View style={styles.summaryCard}>
-        <View>
-          <Text style={styles.summaryEyebrow}>Today</Text>
-          <Text style={styles.summaryTitle}>
-            {completedCount}/{habits.length} completed
-          </Text>
-          <Text style={styles.summaryBody}>
-            {earnedXp}/{availableXp} XP collected from today's tasks.
-          </Text>
+          <ScrollView
+            ref={dateSliderRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.sliderContent}
+            style={styles.sliderRow}
+            onContentSizeChange={() =>
+              dateSliderRef.current?.scrollToEnd({ animated: false })
+            }
+          >
+            {dateOptions.map((option) => {
+              const active = option.key === selectedDateKey;
+
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={option.key}
+                  onPress={() => setSelectedDateKey(option.key)}
+                  style={({ pressed }) => [
+                    styles.dateChip,
+                    active && styles.dateChipActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.dateChipDay, active && styles.dateChipDayActive]}>
+                    {option.dayLabel}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.dateChipNumber,
+                      active && styles.dateChipNumberActive,
+                    ]}
+                  >
+                    {option.dayNumber}
+                  </Text>
+                  <Text style={[styles.dateChipMeta, active && styles.dateChipMetaActive]}>
+                    {option.relativeLabel}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
-        <SmallActionButton
-          title="+ New"
-          style={styles.newButton}
-          textStyle={styles.newButtonText}
+
+        <WeeklyHydration
+          values={weeklyWindow.map((day) => day.cups)}
+          labels={weeklyWindow.map((day) => day.label)}
         />
-      </View>
 
-      <View style={styles.filterRow}>
-        <View style={[styles.filterChip, styles.filterChipActive]}>
-          <Text style={[styles.filterText, styles.filterTextActive]}>All</Text>
-        </View>
-        <View style={styles.filterChip}>
-          <Text style={styles.filterText}>Active</Text>
-        </View>
-        <View style={styles.filterChip}>
-          <Text style={styles.filterText}>Done</Text>
-        </View>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Your habits</Text>
-        <Text style={styles.sectionMeta}>{habits.length} habits</Text>
-      </View>
-
-      {habits.map((habit) => (
-        habit.id === 'water' ? (
-          <WaterHabitRow
-            key={habit.id}
-            habit={habit}
-            cups={waterCups}
-            onChange={handleWaterChange}
+        <View style={styles.summaryCard}>
+          <View>
+            <Text style={styles.summaryEyebrow}>{selectedDateMeta}</Text>
+            <Text style={styles.summaryTitle}>
+              {completedCount}/{habits.length} completed
+            </Text>
+            <Text style={styles.summaryBody}>
+              {earnedXp}/{availableXp} XP collected on this day.
+            </Text>
+          </View>
+          <SmallActionButton
+            title="+ New"
+            onPress={() => setComposerVisible(true)}
+            style={styles.newButton}
+            textStyle={styles.newButtonText}
           />
-        ) : (
-          <HabitRow
-            key={habit.id}
-            habit={habit}
-            onToggle={() => onToggleHabit(habit.id)}
-          />
-        )
-      ))}
-    </PageLayout>
+        </View>
+
+        <View style={styles.filterRow}>
+          {filters.map((filter) => {
+            const active = selectedFilter === filter.key;
+
+            return (
+              <Pressable
+                accessibilityRole="button"
+                key={filter.key}
+                onPress={() => setSelectedFilter(filter.key)}
+                style={({ pressed }) => [
+                  styles.filterChip,
+                  active && styles.filterChipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.filterText, active && styles.filterTextActive]}>
+                  {filter.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Your habits</Text>
+          <Text style={styles.sectionMeta}>{sectionMetaLabel}</Text>
+        </View>
+
+        {filteredHabits.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateTitle}>No habits here yet</Text>
+            <Text style={styles.emptyStateBody}>
+              {selectedFilter === 'active'
+                ? 'Everything for this day is already done.'
+                : 'Nothing has been completed on this day yet.'}
+            </Text>
+          </View>
+        ) : null}
+
+        {filteredHabits.map((habit) =>
+          habit.id === 'water' ? (
+            <WaterHabitRow
+              celebrationToken={
+                celebrationTarget?.dateKey === selectedDateKey &&
+                celebrationTarget?.habitId === habit.id
+                  ? celebrationTarget.token
+                  : null
+              }
+              key={habit.id}
+              habit={habit}
+              cups={waterCups}
+              onCelebrateDone={(token) =>
+                setCelebrationTarget((current) =>
+                  current?.token === token ? null : current
+                )
+              }
+              onChange={handleWaterChange}
+              onDelete={() => handleDeleteHabit(habit.id)}
+              onToggle={() => handleToggleHabit(habit)}
+            />
+          ) : (
+            <HabitRow
+              celebrationToken={
+                celebrationTarget?.dateKey === selectedDateKey &&
+                celebrationTarget?.habitId === habit.id
+                  ? celebrationTarget.token
+                  : null
+              }
+              key={habit.id}
+              habit={habit}
+              onCelebrateDone={(token) =>
+                setCelebrationTarget((current) =>
+                  current?.token === token ? null : current
+                )
+              }
+              onDelete={() => handleDeleteHabit(habit.id)}
+              onToggle={() => handleToggleHabit(habit)}
+            />
+          )
+        )}
+      </PageLayout>
+
+      <AddHabitSheet
+        dateLabel={selectedDateTitle}
+        onClose={() => setComposerVisible(false)}
+        onSubmit={handleAddHabit}
+        visible={composerVisible}
+      />
+    </>
   );
 }
 
-function WaterHabitRow({ habit, cups, onChange }) {
-  return (
-    <View style={[styles.waterCard, cups >= WATER_GOAL && styles.waterCardDone]}>
-      <View style={styles.waterHeader}>
-        <View>
-          <Text style={styles.habitTitle}>{habit.title}</Text>
-          <Text style={styles.habitSchedule}>
-            {cups}/{WATER_GOAL} glasses today
-          </Text>
-        </View>
-        <View style={styles.xpPill}>
-          <Text style={styles.xpText}>+{habit.xp} XP</Text>
-        </View>
-      </View>
+function WaterHabitRow({
+  habit,
+  cups,
+  celebrationToken,
+  onCelebrateDone,
+  onChange,
+  onDelete,
+  onToggle,
+}) {
+  const checked = cups >= WATER_GOAL;
 
-      <DailyHydrationRow cups={cups} onChange={onChange} />
+  return (
+    <View style={[styles.habitCard, styles.waterCard, checked && styles.waterCardDone]}>
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked }}
+        onPress={onToggle}
+        style={({ pressed }) => [
+          styles.checkButton,
+          checked && styles.checkButtonDone,
+          pressed && styles.pressed,
+        ]}
+      >
+        {checked ? <CheckMark /> : null}
+      </Pressable>
+
+      <View style={styles.habitContent}>
+        <View style={styles.cardBody}>
+          <View style={styles.cardMain}>
+            <HabitInfo
+              done={checked}
+              habit={habit}
+              subtitle={`${cups}/${WATER_GOAL} glasses logged`}
+            />
+          </View>
+
+          <View style={styles.cardRail}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onDelete}
+              style={({ pressed }) => [
+                styles.deleteButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.deleteButtonText}>Delete</Text>
+            </Pressable>
+            <CelebrationPocket
+              active={checked}
+              token={celebrationToken}
+              xp={habit.xp}
+              onDone={onCelebrateDone}
+            />
+          </View>
+        </View>
+
+        <DailyHydrationRow cups={cups} onChange={onChange} />
+      </View>
     </View>
   );
 }
 
-function HabitRow({ habit, onToggle }) {
+function HabitRow({ habit, celebrationToken, onCelebrateDone, onDelete, onToggle }) {
   return (
     <View style={[styles.habitCard, habit.checked && styles.habitCardDone]}>
       <Pressable
@@ -133,44 +431,185 @@ function HabitRow({ habit, onToggle }) {
       </Pressable>
 
       <View style={styles.habitContent}>
-        <View style={styles.habitHeader}>
-          <Text
-            style={[styles.habitTitle, habit.checked && styles.habitTitleDone]}
-            numberOfLines={1}
-          >
-            {habit.title}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.moreButton, pressed && styles.pressed]}
-          >
-            <View style={styles.moreDot} />
-            <View style={styles.moreDot} />
-            <View style={styles.moreDot} />
-          </Pressable>
-        </View>
-
-        <Text style={styles.habitSchedule}>{habit.schedule}</Text>
-
-        <View style={styles.habitMetaRow}>
-          <View style={styles.categoryPill}>
-            <Text style={styles.categoryText}>{habit.category}</Text>
+        <View style={styles.cardBody}>
+          <View style={styles.cardMain}>
+            <HabitInfo
+              done={habit.checked}
+              habit={habit}
+              subtitle={habit.schedule}
+            />
           </View>
-          <View style={styles.xpPill}>
-            <Text style={styles.xpText}>+{habit.xp} XP</Text>
-          </View>
-          <Text style={styles.streakText}>{habit.streak} day streak</Text>
-        </View>
 
-        <View style={styles.progressTrack}>
-          <View
-            style={[
-              styles.progressFill,
-              { width: `${habit.checked ? 100 : habit.progress}%` },
-            ]}
-          />
+          <View style={styles.cardRail}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onDelete}
+              style={({ pressed }) => [
+                styles.deleteButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.deleteButtonText}>Delete</Text>
+            </Pressable>
+            <CelebrationPocket
+              active={habit.checked}
+              token={celebrationToken}
+              xp={habit.xp}
+              onDone={onCelebrateDone}
+            />
+          </View>
         </View>
       </View>
+    </View>
+  );
+}
+
+function HabitInfo({ habit, subtitle, done }) {
+  return (
+    <>
+      <View style={styles.habitHeader}>
+        <Text
+          style={[styles.habitTitle, done && styles.habitTitleDone]}
+          numberOfLines={1}
+        >
+          {habit.title}
+        </Text>
+      </View>
+
+      <Text style={styles.habitSchedule}>{subtitle}</Text>
+
+      <View style={styles.habitMetaRow}>
+        <View style={styles.categoryPill}>
+          <Text style={styles.categoryText}>{habit.category}</Text>
+        </View>
+        <View style={styles.xpPill}>
+          <Text style={styles.xpText}>+{habit.xp} XP</Text>
+        </View>
+        <Text style={styles.streakText}>{habit.streak} day streak</Text>
+      </View>
+    </>
+  );
+}
+
+function CelebrationPocket({ active, token, xp, onDone }) {
+  const visibility = useRef(new Animated.Value(active ? 1 : 0)).current;
+  const lift = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(1)).current;
+  const spark = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(visibility, {
+      toValue: active ? 1 : 0,
+      duration: active ? 180 : 120,
+      useNativeDriver: true,
+    }).start();
+  }, [active]);
+
+  useEffect(() => {
+    if (!token || !active) {
+      return undefined;
+    }
+
+    lift.setValue(10);
+    scale.setValue(0.86);
+    spark.setValue(0);
+
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: 1,
+        friction: 7,
+        tension: 85,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.timing(lift, {
+          toValue: 0,
+          duration: 260,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.sequence([
+        Animated.timing(spark, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(spark, {
+          toValue: 0.2,
+          duration: 640,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+
+    const timeoutId = setTimeout(() => {
+      onDone?.(token);
+    }, 1350);
+
+    return () => clearTimeout(timeoutId);
+  }, [token]);
+
+  const sparkleLeft = spark.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -18],
+  });
+  const sparkleRight = spark.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 16],
+  });
+  const sparkleTop = spark.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -14],
+  });
+  const sparkleOpacity = spark.interpolate({
+    inputRange: [0, 0.3, 1],
+    outputRange: [0, 0.7, 1],
+  });
+
+  return (
+    <View style={styles.celebrationSlot} pointerEvents="none">
+      <Animated.View
+        style={[
+          styles.celebrationBadge,
+          {
+            opacity: visibility,
+            transform: [{ translateY: lift }, { scale }],
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.sparkleDot,
+            styles.sparkleDotLeft,
+            {
+              opacity: sparkleOpacity,
+              transform: [{ translateX: sparkleLeft }, { translateY: sparkleTop }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.sparkleDot,
+            styles.sparkleDotCenter,
+            {
+              opacity: sparkleOpacity,
+              transform: [{ translateY: sparkleTop }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.sparkleDot,
+            styles.sparkleDotRight,
+            {
+              opacity: sparkleOpacity,
+              transform: [{ translateX: sparkleRight }, { translateY: sparkleTop }],
+            },
+          ]}
+        />
+        <Text style={styles.celebrationText}>+{xp} XP</Text>
+        <Text style={styles.celebrationSubtext}>Nice work</Text>
+      </Animated.View>
     </View>
   );
 }
@@ -188,6 +627,80 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: 18,
     paddingBottom: 20,
+  },
+  dateCard: {
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 18,
+    marginBottom: 14,
+    ...shadow,
+  },
+  dateEyebrow: {
+    color: colors.green,
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  dateTitle: {
+    color: colors.ink,
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: '900',
+  },
+  dateBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
+  },
+  sliderRow: {
+    marginTop: 18,
+  },
+  sliderContent: {
+    paddingRight: 4,
+    gap: 10,
+  },
+  dateChip: {
+    width: 86,
+    minHeight: 94,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceSoft,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  dateChipActive: {
+    backgroundColor: colors.greenDark,
+    borderColor: colors.greenDark,
+  },
+  dateChipDay: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  dateChipDayActive: {
+    color: '#A9E5B5',
+  },
+  dateChipNumber: {
+    color: colors.ink,
+    fontSize: 28,
+    lineHeight: 30,
+    fontWeight: '900',
+  },
+  dateChipNumberActive: {
+    color: '#FFFFFF',
+  },
+  dateChipMeta: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  dateChipMetaActive: {
+    color: '#D6EAE1',
   },
   summaryCard: {
     minHeight: 128,
@@ -279,12 +792,6 @@ const styles = StyleSheet.create({
     borderColor: '#BDE8F8',
     backgroundColor: '#FAFDFF',
   },
-  waterHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
   habitCard: {
     minHeight: 128,
     borderRadius: radii.card,
@@ -342,10 +849,17 @@ const styles = StyleSheet.create({
   habitContent: {
     flex: 1,
   },
+  cardBody: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  cardMain: {
+    flex: 1,
+    minWidth: 0,
+  },
   habitHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
   habitTitle: {
     flex: 1,
@@ -357,20 +871,28 @@ const styles = StyleSheet.create({
   habitTitleDone: {
     color: colors.muted,
   },
-  moreButton: {
-    width: 32,
-    height: 28,
-    borderRadius: 8,
+  cardRail: {
+    width: 82,
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginLeft: 10,
+    paddingTop: 1,
+  },
+  deleteButton: {
+    minHeight: 28,
+    minWidth: 72,
+    borderRadius: 10,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 3,
+    backgroundColor: '#FFF1F1',
+    borderWidth: 1,
+    borderColor: '#F4D0D0',
   },
-  moreDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.soft,
+  deleteButtonText: {
+    color: colors.danger,
+    fontSize: 11,
+    fontWeight: '800',
   },
   habitSchedule: {
     color: colors.muted,
@@ -384,7 +906,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginTop: 12,
-    marginBottom: 12,
+    marginBottom: 6,
   },
   categoryPill: {
     minHeight: 24,
@@ -417,16 +939,79 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.surfaceSoft,
-    overflow: 'hidden',
+  emptyState: {
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 18,
+    marginBottom: 12,
+    ...shadow,
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: colors.green,
+  emptyStateTitle: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  emptyStateBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+  },
+  celebrationSlot: {
+    flex: 1,
+    width: '100%',
+    minHeight: 66,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  celebrationBadge: {
+    width: 72,
+    minHeight: 52,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EEF8F2',
+    borderWidth: 1,
+    borderColor: '#CAE8D9',
+    overflow: 'visible',
+  },
+  celebrationText: {
+    color: colors.greenDark,
+    fontSize: 11,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  celebrationSubtext: {
+    color: colors.green,
+    fontSize: 9,
+    fontWeight: '800',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  sparkleDot: {
+    position: 'absolute',
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+  },
+  sparkleDotLeft: {
+    left: 10,
+    top: 12,
+    backgroundColor: '#72D6C9',
+  },
+  sparkleDotCenter: {
+    left: 24,
+    top: 4,
+    backgroundColor: '#F2C94C',
+  },
+  sparkleDotRight: {
+    right: 12,
+    top: 12,
+    backgroundColor: '#A9E5B5',
   },
   pressed: {
     opacity: 0.7,

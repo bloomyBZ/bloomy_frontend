@@ -10,7 +10,15 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import VerifyScreen from './src/screens/VerifyScreen';
-import { getEarnedXp, getLevelProgress, initialHabits } from './src/data/habits';
+import {
+  cloneHabits,
+  createCustomHabit,
+  createInitialHabitHistory,
+  getDateKey,
+  getEarnedXp,
+  getLevelProgress,
+  initialHabits,
+} from './src/data/habits';
 import { colors } from './src/theme';
 
 const screens = {
@@ -29,9 +37,13 @@ const screens = {
 
 export default function App() {
   const [screen, setScreen] = useState(screens.onboardingIntro);
-  const [habits, setHabits] = useState(initialHabits);
+  const todayKey = useMemo(() => getDateKey(new Date()), []);
+  const [habitHistory, setHabitHistory] = useState(() =>
+    createInitialHabitHistory(initialHabits)
+  );
   const [evolution, setEvolution] = useState(null);
-  const earnedXp = getEarnedXp(habits);
+  const todayHabits = habitHistory[todayKey] ?? cloneHabits(initialHabits);
+  const earnedXp = getEarnedXp(todayHabits);
   const levelProgress = useMemo(() => getLevelProgress(earnedXp), [earnedXp]);
   const previousLevelRef = useRef(levelProgress.level);
 
@@ -51,18 +63,48 @@ export default function App() {
   const goLogin = () => setScreen(screens.login);
   const goHome = () => setScreen(screens.home);
   const goTab = (tab) => setScreen(screens[tab] ?? screens.home);
-  const toggleHabit = (id) => {
-    setHabits((current) =>
-      current.map((habit) =>
-        habit.id === id ? { ...habit, checked: !habit.checked } : habit
-      )
+  const setHabitValues = (dateKey, id, updates) => {
+    setHabitHistory((current) => {
+      const dayHabits = current[dateKey] ?? cloneHabits(initialHabits);
+
+      return {
+        ...current,
+        [dateKey]: dayHabits.map((habit) =>
+          habit.id === id ? { ...habit, ...updates } : habit
+        ),
+      };
+    });
+  };
+  const addHabit = (startDateKey, draft) => {
+    const newHabit = createCustomHabit(draft);
+
+    setHabitHistory((current) =>
+      Object.keys(current)
+        .sort((first, second) => first.localeCompare(second))
+        .reduce((next, dateKey) => {
+          const dayHabits = current[dateKey] ?? cloneHabits(initialHabits);
+
+          next[dateKey] =
+            dateKey >= startDateKey ? [...dayHabits, { ...newHabit }] : dayHabits;
+
+          return next;
+        }, {})
     );
   };
-  const setHabitChecked = (id, checked) => {
-    setHabits((current) =>
-      current.map((habit) =>
-        habit.id === id ? { ...habit, checked } : habit
-      )
+  const deleteHabit = (startDateKey, id) => {
+    setHabitHistory((current) =>
+      Object.keys(current)
+        .sort((first, second) => first.localeCompare(second))
+        .reduce((next, dateKey) => {
+          const dayHabits = current[dateKey] ?? cloneHabits(initialHabits);
+
+          next[dateKey] =
+            dateKey >= startDateKey
+              ? dayHabits.filter((habit) => habit.id !== id)
+              : dayHabits;
+
+          return next;
+        }, {})
     );
   };
 
@@ -138,22 +180,32 @@ export default function App() {
   }
 
   if (screen === screens.home) {
-    currentScreen = <HomeScreen onTabPress={goTab} />;
+    currentScreen = (
+      <HomeScreen
+        habitHistory={habitHistory}
+        habits={todayHabits}
+        onAddHabit={addHabit}
+        onTabPress={goTab}
+        todayKey={todayKey}
+      />
+    );
   }
 
   if (screen === screens.habits) {
     currentScreen = (
       <HabitsScreen
-        habits={habits}
-        onToggleHabit={toggleHabit}
-        onSetHabitChecked={setHabitChecked}
+        habitHistory={habitHistory}
+        todayKey={todayKey}
+        onAddHabit={addHabit}
+        onDeleteHabit={deleteHabit}
+        onSetHabitValues={setHabitValues}
         onTabPress={goTab}
       />
     );
   }
 
   if (screen === screens.profile) {
-    currentScreen = <ProfileScreen habits={habits} onTabPress={goTab} />;
+    currentScreen = <ProfileScreen habits={todayHabits} onTabPress={goTab} />;
   }
 
   return (

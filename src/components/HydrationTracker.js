@@ -1,13 +1,12 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { WATER_GOAL } from '../data/habits';
 import { colors, radii, shadow } from '../theme';
-
-export const WATER_GOAL = 7;
 
 const hydrationBlue = '#13A8E8';
 const emptyBlue = '#E7EEF9';
-const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const defaultDays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-export function WeeklyHydration({ values }) {
+export function WeeklyHydration({ values, labels = defaultDays }) {
   return (
     <View style={styles.weekCard}>
       <Text style={styles.title}>Weekly Hydration</Text>
@@ -17,7 +16,7 @@ export function WeeklyHydration({ values }) {
       </Text>
 
       <View style={styles.weekGrid}>
-        {days.map((day, index) => (
+        {labels.map((day, index) => (
           <View key={`${day}-${index}`} style={styles.dayColumn}>
             <SegmentedGlass filled={values[index] ?? 0} />
             <Text style={styles.dayLabel}>{day}</Text>
