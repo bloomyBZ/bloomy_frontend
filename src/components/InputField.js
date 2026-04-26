@@ -5,11 +5,16 @@ export default function InputField({
   label,
   placeholder,
   defaultValue,
+  value,
+  onChangeText,
   secure = false,
   keyboardType = 'default',
   prefix,
   right = 'check',
   style,
+  editable = true,
+  autoCapitalize = 'none',
+  autoCorrect = false,
 }) {
   return (
     <View style={[styles.wrap, style]}>
@@ -18,10 +23,15 @@ export default function InputField({
         {prefix ? <Text style={styles.prefix}>{prefix}</Text> : null}
         <TextInput
           defaultValue={defaultValue}
+          value={value}
+          onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor="#97918E"
           secureTextEntry={secure}
           keyboardType={keyboardType}
+          editable={editable}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
           style={styles.input}
         />
         {right === 'check' ? (

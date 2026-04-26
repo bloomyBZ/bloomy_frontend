@@ -2,15 +2,20 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SmallActionButton } from '../components/Button';
 import { BooksArtwork, DeskArtwork } from '../components/Illustrations';
 import PageLayout from '../components/PageLayout';
+import NoticeBanner from '../components/NoticeBanner';
+import {
+  getDisplayName,
+  getEvolutionStageImage,
+  getStageLabel,
+} from '../api/mappers';
 import {
   formatHabitDate,
   getAvailableXp,
   getCompletedCount,
   getEarnedXp,
+  getLevelProgress,
 } from '../data/habits';
 import { colors, radii, shadow } from '../theme';
-
-const seed = require('../../assets/bloomy-docs/bloomy-wbg/stage1.png');
 
 const suggestedTemplates = [
   {
@@ -61,25 +66,29 @@ function MetricCard({ label, value, detail }) {
   );
 }
 
-function AiCoachCard() {
+function AiCoachCard({ recommendationsLoading, recommendationCount }) {
   return (
     <View style={styles.aiCard}>
-      <Text style={styles.aiEyebrow}>AI coach placeholder</Text>
-      <Text style={styles.aiTitle}>Personalized suggestions are coming soon</Text>
+      <Text style={styles.aiEyebrow}>Fresh ideas</Text>
+      <Text style={styles.aiTitle}>
+        {recommendationsLoading
+          ? 'Pulling personalized suggestions...'
+          : `${recommendationCount} recommendation${
+              recommendationCount === 1 ? '' : 's'
+            } ready for you`}
+      </Text>
       <Text style={styles.aiBody}>
-        Bloomy will soon learn from your streaks, completed habits, and favorite
-        categories to recommend better routines just for you.
+        Explore a few habit ideas picked for you and add the ones that fit your day.
       </Text>
 
       <View style={styles.aiChipRow}>
-        <InfoChip label="Learns your rhythm" />
-        <InfoChip label="Tracks favorite categories" />
-        <InfoChip label="Suggests what fits next" />
+        <InfoChip label="Easy to start" />
+        <InfoChip label="Small daily wins" />
+        <InfoChip label="Grow your streak" />
       </View>
 
       <Text style={styles.aiFootnote}>
-        Until AI is ready, you can browse the starter library below and add any
-        habit you like directly to your list.
+        If these suggestions are empty, you can still pick a starter habit below.
       </Text>
     </View>
   );
@@ -192,13 +201,20 @@ function MoonArtwork() {
   );
 }
 
-function getTemplateSignature({ category, schedule, title }) {
-  return `${title}::${schedule}::${category}`.toLowerCase();
+function getTemplateSignature({ category, title }) {
+  return `${title}::${category}`.toLowerCase();
 }
 
 export default function HomeScreen({
   habitHistory,
   habits,
+  plant,
+  profile,
+  stats,
+  recommendations,
+  recommendationsError,
+  recommendationsLoading,
+  actionError,
   onAddHabit,
   onTabPress,
   todayKey,
@@ -211,6 +227,7 @@ export default function HomeScreen({
     ? Math.round((completedCount / habits.length) * 100)
     : 0;
   const todayLabel = formatHabitDate(todayKey);
+  const levelProgress = getLevelProgress(stats?.total_points ?? 0);
   const addedHabitSet = new Set(habits.map((habit) => getTemplateSignature(habit)));
   const previewHabits = [...habits]
     .sort((first, second) => Number(first.checked) - Number(second.checked))
@@ -227,26 +244,38 @@ export default function HomeScreen({
 
     return getCompletedCount(dayHabits) / dayHabits.length >= 0.5;
   }).length;
+  const displayName = getDisplayName(profile);
+  const stageImage = getEvolutionStageImage(levelProgress.level);
+  const stageLabel = getStageLabel(levelProgress.level);
+  const suggestionLibrary = recommendations?.length ? recommendations : suggestedTemplates;
 
   return (
     <PageLayout
-      title="Welcome Betul!"
+      title={`Welcome ${displayName}!`}
       subtitle={todayLabel}
       activeTab="home"
       onTabPress={onTabPress}
       scroll
       contentStyle={styles.scrollContent}
     >
+      <NoticeBanner message={actionError} tone="error" style={styles.notice} />
+
       <View style={styles.summaryCard}>
         <View style={styles.summaryCopy}>
           <Text style={styles.eyebrow}>Today's focus</Text>
           <Text style={styles.summaryTitle}>
-            {pendingCount > 0 ? `${pendingCount} habits waiting` : 'All habits completed'}
+            {habits.length === 0
+              ? 'Create your first habit'
+              : pendingCount > 0
+                ? `${pendingCount} habits waiting`
+                : 'All habits completed'}
           </Text>
           <Text style={styles.summaryBody}>
-            {pendingCount > 0
-              ? `You already completed ${completedCount}. Keep Bloomy growing with one more small action.`
-              : 'Everything on your list is done. Browse the starter library below if you want something new.'}
+            {habits.length === 0
+              ? 'Start with one suggestion below and add it to your routine in a tap.'
+              : pendingCount > 0
+                ? `You already completed ${completedCount}. Keep Bloomy growing with one more small action.`
+                : 'Everything on your list is done. Browse the habit ideas below if you want something new.'}
           </Text>
           <SmallActionButton
             onPress={() => onTabPress?.('habits')}
@@ -255,7 +284,12 @@ export default function HomeScreen({
           />
         </View>
         <View style={styles.plantBadge}>
-          <Image source={seed} style={styles.seedImage} resizeMode="contain" />
+          <Image
+            source={stageImage}
+            style={styles.seedImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.plantMeta}>{stageLabel}</Text>
         </View>
       </View>
 
@@ -293,19 +327,26 @@ export default function HomeScreen({
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Suggested habits</Text>
-        <Text style={styles.sectionAction}>AI soon</Text>
-      </View>
-
-      <AiCoachCard />
-
-      <View style={styles.libraryHeader}>
-        <Text style={styles.libraryTitle}>Ready habits library</Text>
-        <Text style={styles.libraryBody}>
-          Pick any starter you like and we will add it to your habit list from today.
+        <Text style={styles.sectionAction}>
+          {recommendationsLoading ? 'Loading' : `${suggestionLibrary.length} ready`}
         </Text>
       </View>
 
-      {suggestedTemplates.map((template) => {
+      <NoticeBanner message={recommendationsError} tone="error" style={styles.notice} />
+
+      <AiCoachCard
+        recommendationsLoading={recommendationsLoading}
+        recommendationCount={suggestionLibrary.length}
+      />
+
+      <View style={styles.libraryHeader}>
+        <Text style={styles.libraryTitle}>Habit ideas</Text>
+        <Text style={styles.libraryBody}>
+          Pick any habit you like and add it to your list for today.
+        </Text>
+      </View>
+
+      {suggestionLibrary.map((template) => {
         const added = addedHabitSet.has(getTemplateSignature(template));
 
         return (
@@ -325,6 +366,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: 18,
     paddingBottom: 20,
+  },
+  notice: {
+    marginBottom: 14,
   },
   summaryCard: {
     width: '100%',
@@ -368,6 +412,13 @@ const styles = StyleSheet.create({
     width: 118,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  plantMeta: {
+    color: '#A9E5B5',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginTop: -4,
   },
   seedImage: {
     width: 138,

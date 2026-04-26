@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import InputField from '../components/InputField';
+import NoticeBanner from '../components/NoticeBanner';
 import Screen, { HomeIndicator } from '../components/Screen';
 import { colors } from '../theme';
 
@@ -14,7 +15,18 @@ function SocialButton({ icon, title }) {
   );
 }
 
-export default function LoginScreen({ onLogin, onForgot, onSignUp }) {
+export default function LoginScreen({
+  onLogin,
+  onForgot,
+  onSignUp,
+  onChangeEmail,
+  onChangePassword,
+  email,
+  password,
+  errorMessage,
+  noticeMessage,
+  isSubmitting,
+}) {
   return (
     <Screen scroll contentStyle={styles.content}>
       <View style={styles.brandMark}>
@@ -29,18 +41,26 @@ export default function LoginScreen({ onLogin, onForgot, onSignUp }) {
       </View>
 
       <View style={styles.form}>
+        <NoticeBanner message={errorMessage} tone="error" />
+        <NoticeBanner message={noticeMessage} tone="success" />
+
         <InputField
-          label="Mobile number"
-          prefix="+90"
-          defaultValue="514-234-57-56"
-          keyboardType="phone-pad"
+          label="Email"
+          value={email}
+          onChangeText={onChangeEmail}
+          placeholder="you@example.com"
+          keyboardType="email-address"
+          right={null}
         />
 
         <InputField
           label="Password"
-          defaultValue="password123"
+          value={password}
+          onChangeText={onChangePassword}
+          placeholder="Enter your password"
           secure
           right="eye"
+          editable={!isSubmitting}
         />
       </View>
 
@@ -48,7 +68,12 @@ export default function LoginScreen({ onLogin, onForgot, onSignUp }) {
         <Text style={styles.forgotText}>forgot password?</Text>
       </Pressable>
 
-      <PrimaryButton title="Login" onPress={onLogin} style={styles.loginButton} />
+      <PrimaryButton
+        title={isSubmitting ? 'Signing in...' : 'Login'}
+        onPress={onLogin}
+        style={styles.loginButton}
+        disabled={isSubmitting}
+      />
 
       <View style={styles.signupRow}>
         <Text style={styles.muted}>Don't have an account? </Text>

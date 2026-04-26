@@ -1,15 +1,17 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radii } from '../theme';
 
-export function PrimaryButton({ title, onPress, style, textStyle }) {
+export function PrimaryButton({ title, onPress, style, textStyle, disabled = false }) {
   return (
     <Pressable
       accessibilityRole="button"
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         styles.primary,
-        pressed && styles.pressed,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
         style,
       ]}
     >
@@ -20,15 +22,17 @@ export function PrimaryButton({ title, onPress, style, textStyle }) {
   );
 }
 
-export function SecondaryButton({ title, onPress, style, textStyle }) {
+export function SecondaryButton({ title, onPress, style, textStyle, disabled = false }) {
   return (
     <Pressable
       accessibilityRole="button"
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         styles.secondary,
-        pressed && styles.pressed,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
         style,
       ]}
     >
@@ -39,14 +43,16 @@ export function SecondaryButton({ title, onPress, style, textStyle }) {
   );
 }
 
-export function SmallActionButton({ title, onPress, style, textStyle }) {
+export function SmallActionButton({ title, onPress, style, textStyle, disabled = false }) {
   return (
     <Pressable
       accessibilityRole="button"
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.small,
-        pressed && styles.pressed,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
         style,
       ]}
     >
@@ -114,5 +120,8 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.78,
+  },
+  disabled: {
+    opacity: 0.45,
   },
 });

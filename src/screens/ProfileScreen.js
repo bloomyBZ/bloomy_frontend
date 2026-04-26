@@ -1,30 +1,40 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { SecondaryButton } from '../components/Button';
 import PageLayout from '../components/PageLayout';
 import {
-  getAvailableXp,
+  getDisplayName,
+  getEvolutionStageImage,
+  getStageLabel,
+} from '../api/mappers';
+import {
   getCompletedCount,
-  getEarnedXp,
   getLevelProgress,
 } from '../data/habits';
 import { colors, radii, shadow } from '../theme';
 
-const stageImages = [
-  require('../../assets/bloomy-docs/bloomy-wbg/stage1.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage2.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage4nobg.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage7nobg.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage8nobg.png'),
-];
-
-export default function ProfileScreen({ habits, onTabPress }) {
-  const earnedXp = getEarnedXp(habits);
-  const availableXp = getAvailableXp(habits);
+export default function ProfileScreen({
+  habits,
+  profile,
+  stats,
+  plant,
+  onLogout,
+  logoutBusy,
+  onTabPress,
+}) {
+  const totalXp = stats?.total_points ?? 0;
   const completedCount = getCompletedCount(habits);
-  const completionRate = Math.round((completedCount / habits.length) * 100);
-  const longestStreak = Math.max(...habits.map((habit) => habit.streak));
-  const levelProgress = getLevelProgress(earnedXp);
-  const stageIndex = Math.min(stageImages.length - 1, levelProgress.level - 1);
+  const completionRate = habits.length
+    ? Math.round((completedCount / habits.length) * 100)
+    : 0;
+  const longestStreak = habits.length
+    ? Math.max(...habits.map((habit) => habit.streak))
+    : 0;
+  const levelProgress = getLevelProgress(totalXp);
+  const stageImage = getEvolutionStageImage(levelProgress.level);
+  const stageLabel = getStageLabel(levelProgress.level);
   const nextXp = levelProgress.nextLevelXp - levelProgress.currentLevelXp;
+  const displayName = getDisplayName(profile);
+  const healthScore = plant?.health_score ?? stats?.plant_health ?? 0;
 
   return (
     <PageLayout
@@ -38,10 +48,12 @@ export default function ProfileScreen({ habits, onTabPress }) {
       <View style={styles.profileHero}>
         <View style={styles.profileHeader}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>B</Text>
+            <Text style={styles.avatarText}>
+              {displayName.charAt(0).toUpperCase() || 'B'}
+            </Text>
           </View>
           <View style={styles.identity}>
-            <Text style={styles.name}>Betul</Text>
+            <Text style={styles.name}>{displayName}</Text>
             <Text style={styles.role}>Habit gardener</Text>
           </View>
           <View style={styles.levelPill}>
@@ -51,15 +63,16 @@ export default function ProfileScreen({ habits, onTabPress }) {
 
         <View style={styles.stageWrap}>
           <Image
-            source={stageImages[stageIndex]}
+            source={stageImage}
             style={styles.stageImage}
             resizeMode="contain"
           />
         </View>
 
-        <Text style={styles.heroTitle}>{earnedXp} XP earned</Text>
+        <Text style={styles.heroTitle}>{totalXp} XP earned</Text>
         <Text style={styles.heroBody}>
-          {nextXp} XP left until your next Bloomy evolution.
+          {nextXp} XP left until your next Bloomy evolution. Plant health is {healthScore}
+          /100 and your current form is {stageLabel}.
         </Text>
 
         <View style={styles.levelTrack}>
@@ -76,7 +89,7 @@ export default function ProfileScreen({ habits, onTabPress }) {
       </View>
 
       <View style={styles.statsGrid}>
-        <StatCard label="Today XP" value={`${earnedXp}`} detail={`of ${availableXp}`} />
+        <StatCard label="Total XP" value={`${totalXp}`} detail="all time" />
         <StatCard label="Done" value={`${completionRate}%`} detail="completion" />
         <StatCard label="Best streak" value={`${longestStreak}`} detail="days" />
       </View>
@@ -89,6 +102,13 @@ export default function ProfileScreen({ habits, onTabPress }) {
       {habits.map((habit) => (
         <GrowthRow key={habit.id} habit={habit} />
       ))}
+
+      <SecondaryButton
+        title={logoutBusy ? 'Signing out...' : 'Log out'}
+        onPress={onLogout}
+        disabled={logoutBusy}
+        style={styles.logoutButton}
+      />
     </PageLayout>
   );
 }
@@ -133,6 +153,9 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: 18,
     paddingBottom: 20,
+  },
+  logoutButton: {
+    marginTop: 18,
   },
   profileHero: {
     borderRadius: radii.card,

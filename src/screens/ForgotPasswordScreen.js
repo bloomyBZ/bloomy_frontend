@@ -3,10 +3,19 @@ import AuthHeader from '../components/AuthHeader';
 import { PrimaryButton } from '../components/Button';
 import { ForgotIllustration } from '../components/Illustrations';
 import InputField from '../components/InputField';
+import NoticeBanner from '../components/NoticeBanner';
 import Screen, { HomeIndicator } from '../components/Screen';
 import { colors } from '../theme';
 
-export default function ForgotPasswordScreen({ onBack, onVerify }) {
+export default function ForgotPasswordScreen({
+  onBack,
+  onVerify,
+  email,
+  onChangeEmail,
+  errorMessage,
+  noticeMessage,
+  isSubmitting,
+}) {
   return (
     <Screen scroll contentStyle={styles.content}>
       <AuthHeader title="Forgot" onBack={onBack} />
@@ -18,18 +27,28 @@ export default function ForgotPasswordScreen({ onBack, onVerify }) {
       <View style={styles.copy}>
         <Text style={styles.title}>Forgot Password?</Text>
         <Text style={styles.body}>
-          Enter the phone number connected to your account and we'll send a verification code.
+          Enter the email on your account and we will send a password reset link.
         </Text>
       </View>
 
+      <NoticeBanner message={errorMessage} tone="error" style={styles.notice} />
+      <NoticeBanner message={noticeMessage} tone="success" style={styles.notice} />
+
       <InputField
-        label="Mobile number"
-        prefix="+90"
-        defaultValue="514-234-57-56"
-        keyboardType="phone-pad"
+        label="Email"
+        value={email}
+        onChangeText={onChangeEmail}
+        keyboardType="email-address"
+        placeholder="you@example.com"
+        right={null}
       />
 
-      <PrimaryButton title="Get OTP" onPress={onVerify} style={styles.button} />
+      <PrimaryButton
+        title={isSubmitting ? 'Sending...' : 'Send reset link'}
+        onPress={onVerify}
+        style={styles.button}
+        disabled={isSubmitting}
+      />
 
       <View style={styles.spacer} />
       <HomeIndicator />
@@ -66,6 +85,9 @@ const styles = StyleSheet.create({
   },
   button: {
     marginTop: 20,
+  },
+  notice: {
+    marginBottom: 14,
   },
   spacer: {
     flex: 1,

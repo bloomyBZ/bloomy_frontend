@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { isHydrationHabit } from '../api/mappers';
 import AddHabitSheet from '../components/AddHabitSheet';
 import PageLayout from '../components/PageLayout';
 import { SmallActionButton } from '../components/Button';
 import { DailyHydrationRow, WeeklyHydration } from '../components/HydrationTracker';
+import NoticeBanner from '../components/NoticeBanner';
 import {
   DEFAULT_WATER_CUPS,
   WATER_GOAL,
@@ -26,18 +28,35 @@ const filters = [
   { key: 'done', label: 'Done' },
 ];
 
+function getHydrationStateKey(dateKey, habitId) {
+  return `${dateKey}:${habitId}`;
+}
+
+function getHydrationCups(habit, cupsByDate, dateKey) {
+  const stateKey = getHydrationStateKey(dateKey, habit.id);
+
+  if (typeof cupsByDate[stateKey] === 'number') {
+    return cupsByDate[stateKey];
+  }
+
+  return habit.cups ?? (habit.checked ? WATER_GOAL : DEFAULT_WATER_CUPS);
+}
+
 export default function HabitsScreen({
   habitHistory,
   todayKey,
   onAddHabit,
   onDeleteHabit,
-  onSetHabitValues,
+  onCompleteHabit,
   onTabPress,
+  actionError,
+  actionBusy,
 }) {
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [composerVisible, setComposerVisible] = useState(false);
   const [celebrationTarget, setCelebrationTarget] = useState(null);
+  const [hydrationCupsByDate, setHydrationCupsByDate] = useState({});
   const dateSliderRef = useRef(null);
 
   const dateOptions = useMemo(
@@ -59,10 +78,29 @@ export default function HabitsScreen({
     }
   }, [habitHistory, selectedDateKey, todayKey]);
 
+  useEffect(() => {
+    setHydrationCupsByDate((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      Object.entries(habitHistory).forEach(([dateKey, dayHabits]) => {
+        dayHabits.filter(isHydrationHabit).forEach((habit) => {
+          const stateKey = getHydrationStateKey(dateKey, habit.id);
+          const defaultCups =
+            habit.cups ?? (habit.checked ? WATER_GOAL : DEFAULT_WATER_CUPS);
+
+          if (next[stateKey] == null || (habit.checked && next[stateKey] < WATER_GOAL)) {
+            next[stateKey] = habit.checked ? WATER_GOAL : defaultCups;
+            changed = true;
+          }
+        });
+      });
+
+      return changed ? next : current;
+    });
+  }, [habitHistory]);
+
   const habits = habitHistory[selectedDateKey] ?? habitHistory[todayKey] ?? [];
-  const waterHabit = habits.find((habit) => habit.id === 'water');
-  const waterCups =
-    waterHabit?.cups ?? (waterHabit?.checked ? WATER_GOAL : DEFAULT_WATER_CUPS);
   const completedCount = getCompletedCount(habits);
   const earnedXp = getEarnedXp(habits);
   const availableXp = getAvailableXp(habits);
@@ -89,17 +127,16 @@ export default function HabitsScreen({
 
     return Array.from({ length: 7 }).map((_, index) => {
       const dateKey = getDateKey(shiftDate(anchorDate, index - 6));
-      const dayWaterHabit = habitHistory[dateKey]?.find((habit) => habit.id === 'water');
+      const dayWaterHabit = habitHistory[dateKey]?.find(isHydrationHabit);
 
       return {
         label: getHabitDayLabel(dateKey).charAt(0),
         cups: dayWaterHabit
-          ? dayWaterHabit.cups ??
-            (dayWaterHabit.checked ? WATER_GOAL : DEFAULT_WATER_CUPS)
+          ? getHydrationCups(dayWaterHabit, hydrationCupsByDate, dateKey)
           : 0,
       };
     });
-  }, [habitHistory, selectedDateKey]);
+  }, [habitHistory, hydrationCupsByDate, selectedDateKey]);
 
   const triggerCelebration = (habitId) => {
     setCelebrationTarget({
@@ -109,57 +146,60 @@ export default function HabitsScreen({
     });
   };
 
-  const handleToggleHabit = (habit) => {
-    if (habit.id === 'water') {
-      const checked = !habit.checked;
-      const cups = checked ? WATER_GOAL : DEFAULT_WATER_CUPS;
-
-      if (!habit.checked && checked) {
-        triggerCelebration(habit.id);
-      }
-
-      onSetHabitValues(selectedDateKey, habit.id, {
-        checked,
-        cups,
-        progress: Math.round((cups / WATER_GOAL) * 100),
-        streak: checked ? habit.streak + 1 : Math.max(1, habit.streak - 1),
-      });
-
+  const handleToggleHabit = async (habit) => {
+    if (habit.checked || actionBusy) {
       return;
     }
 
-    const checked = !habit.checked;
+    const result = await onCompleteHabit?.(habit.id);
 
-    if (!habit.checked && checked) {
+    if (result !== false) {
+      if (isHydrationHabit(habit)) {
+        setHydrationCupsByDate((current) => ({
+          ...current,
+          [getHydrationStateKey(selectedDateKey, habit.id)]: WATER_GOAL,
+        }));
+      }
       triggerCelebration(habit.id);
     }
-
-    onSetHabitValues(selectedDateKey, habit.id, {
-      checked,
-      progress: checked ? 100 : Math.max(20, habit.progress - 35),
-      streak: checked ? habit.streak + 1 : Math.max(1, habit.streak - 1),
-    });
   };
 
-  const handleWaterChange = (nextCups) => {
-    const nextChecked = nextCups >= WATER_GOAL;
-    let nextStreak = waterHabit?.streak ?? 1;
-
-    if (!waterHabit?.checked && nextChecked) {
-      nextStreak += 1;
-      triggerCelebration('water');
+  const handleWaterChange = async (habit, nextCups) => {
+    if (!habit || actionBusy) {
+      return;
     }
 
-    if (waterHabit?.checked && !nextChecked) {
-      nextStreak = Math.max(1, nextStreak - 1);
+    const stateKey = getHydrationStateKey(selectedDateKey, habit.id);
+    const previousCups = getHydrationCups(habit, hydrationCupsByDate, selectedDateKey);
+
+    if (habit.checked) {
+      return;
     }
 
-    onSetHabitValues(selectedDateKey, 'water', {
-      cups: nextCups,
-      checked: nextChecked,
-      progress: Math.round((nextCups / WATER_GOAL) * 100),
-      streak: nextStreak,
-    });
+    setHydrationCupsByDate((current) => ({
+      ...current,
+      [stateKey]: nextCups,
+    }));
+
+    if (nextCups < WATER_GOAL) {
+      return;
+    }
+
+    const result = await onCompleteHabit?.(habit.id);
+
+    if (result !== false) {
+      setHydrationCupsByDate((current) => ({
+        ...current,
+        [stateKey]: WATER_GOAL,
+      }));
+      triggerCelebration(habit.id);
+      return;
+    }
+
+    setHydrationCupsByDate((current) => ({
+      ...current,
+      [stateKey]: previousCups,
+    }));
   };
 
   const handleAddHabit = (draft) => {
@@ -172,6 +212,17 @@ export default function HabitsScreen({
         ? null
         : current
     );
+    setHydrationCupsByDate((current) => {
+      const stateKey = getHydrationStateKey(selectedDateKey, habitId);
+
+      if (!(stateKey in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[stateKey];
+      return next;
+    });
     onDeleteHabit?.(selectedDateKey, habitId);
   };
 
@@ -185,6 +236,8 @@ export default function HabitsScreen({
         scroll
         contentStyle={styles.content}
       >
+        <NoticeBanner message={actionError} tone="error" style={styles.notice} />
+
         <View style={styles.dateCard}>
           <Text style={styles.dateEyebrow}>Habit history</Text>
           <Text style={styles.dateTitle}>{selectedDateTitle}</Text>
@@ -294,13 +347,13 @@ export default function HabitsScreen({
             <Text style={styles.emptyStateBody}>
               {selectedFilter === 'active'
                 ? 'Everything for this day is already done.'
-                : 'Nothing has been completed on this day yet.'}
+                : 'Create a new habit or finish one to see it here.'}
             </Text>
           </View>
         ) : null}
 
         {filteredHabits.map((habit) =>
-          habit.id === 'water' ? (
+          isHydrationHabit(habit) ? (
             <WaterHabitRow
               celebrationToken={
                 celebrationTarget?.dateKey === selectedDateKey &&
@@ -310,13 +363,13 @@ export default function HabitsScreen({
               }
               key={habit.id}
               habit={habit}
-              cups={waterCups}
+              cups={getHydrationCups(habit, hydrationCupsByDate, selectedDateKey)}
               onCelebrateDone={(token) =>
                 setCelebrationTarget((current) =>
                   current?.token === token ? null : current
                 )
               }
-              onChange={handleWaterChange}
+              onChange={(nextCups) => handleWaterChange(habit, nextCups)}
               onDelete={() => handleDeleteHabit(habit.id)}
               onToggle={() => handleToggleHabit(habit)}
             />
@@ -627,6 +680,9 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: 18,
     paddingBottom: 20,
+  },
+  notice: {
+    marginBottom: 14,
   },
   dateCard: {
     borderRadius: radii.card,

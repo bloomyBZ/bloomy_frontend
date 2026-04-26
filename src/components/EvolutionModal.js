@@ -9,15 +9,8 @@ import {
   View,
 } from 'react-native';
 import { PrimaryButton } from './Button';
+import { getEvolutionStageImage } from '../api/mappers';
 import { colors, radii } from '../theme';
-
-const stageImages = [
-  require('../../assets/bloomy-docs/bloomy-wbg/stage1.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage2.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage4nobg.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage7nobg.png'),
-  require('../../assets/bloomy-docs/bloomy-wbg/stage8nobg.png'),
-];
 
 export default function EvolutionModal({ visible, level, xp, onClose }) {
   const fade = useRef(new Animated.Value(0)).current;
@@ -80,7 +73,7 @@ export default function EvolutionModal({ visible, level, xp, onClose }) {
     };
   }, [cardScale, fade, float, imageScale, visible]);
 
-  const stageImage = stageImages[Math.min(stageImages.length - 1, level - 1)];
+  const stageImage = getEvolutionStageImage(level);
   const translateY = float.interpolate({
     inputRange: [0, 1],
     outputRange: [0, -9],

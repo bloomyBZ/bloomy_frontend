@@ -1,6 +1,25 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import {
+  completeHabit,
+  createHabit,
+  deleteHabit,
+  getHabitRecommendations,
+  getHabitStreak,
+  getPlant,
+  getUserHabits,
+  getUserProfile,
+  getUserStats,
+  logoutUser,
+  registerUser,
+} from './src/api/bloomyApi';
+import {
+  buildHabitCreatePayload,
+  mapBackendHabitToUi,
+  mapRecommendationToCard,
+} from './src/api/mappers';
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from './src/api/firebaseIdentity';
 import EvolutionModal from './src/components/EvolutionModal';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import HabitsScreen from './src/screens/HabitsScreen';
@@ -9,15 +28,9 @@ import LoginScreen from './src/screens/LoginScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
-import VerifyScreen from './src/screens/VerifyScreen';
 import {
-  cloneHabits,
-  createCustomHabit,
-  createInitialHabitHistory,
   getDateKey,
-  getEarnedXp,
   getLevelProgress,
-  initialHabits,
 } from './src/data/habits';
 import { colors } from './src/theme';
 
@@ -28,23 +41,70 @@ const screens = {
   onboardingClarity: 'onboardingClarity',
   login: 'login',
   forgot: 'forgot',
-  verify: 'verify',
   register: 'register',
   home: 'home',
   habits: 'habits',
   profile: 'profile',
 };
 
+function createLoginForm() {
+  return {
+    email: '',
+    password: '',
+  };
+}
+
+function createRegisterForm() {
+  return {
+    displayName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  };
+}
+
+function normalizeEmail(value) {
+  return value.trim().toLowerCase();
+}
+
+function toSession(identityResponse) {
+  return {
+    idToken: identityResponse.idToken,
+    refreshToken: identityResponse.refreshToken,
+    uid: identityResponse.localId,
+    email: identityResponse.email,
+  };
+}
+
 export default function App() {
   const [screen, setScreen] = useState(screens.onboardingIntro);
-  const todayKey = useMemo(() => getDateKey(new Date()), []);
-  const [habitHistory, setHabitHistory] = useState(() =>
-    createInitialHabitHistory(initialHabits)
-  );
+  const [authSession, setAuthSession] = useState(null);
+  const [loginForm, setLoginForm] = useState(createLoginForm);
+  const [registerForm, setRegisterForm] = useState(createRegisterForm);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [profile, setProfile] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [plant, setPlant] = useState(null);
+  const [habits, setHabits] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [completionState, setCompletionState] = useState({});
+  const [authBusy, setAuthBusy] = useState(false);
+  const [forgotBusy, setForgotBusy] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [recommendationsError, setRecommendationsError] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authNotice, setAuthNotice] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotNotice, setForgotNotice] = useState('');
+  const [actionError, setActionError] = useState('');
   const [evolution, setEvolution] = useState(null);
-  const todayHabits = habitHistory[todayKey] ?? cloneHabits(initialHabits);
-  const earnedXp = getEarnedXp(todayHabits);
-  const levelProgress = useMemo(() => getLevelProgress(earnedXp), [earnedXp]);
+
+  const todayKey = useMemo(() => getDateKey(new Date()), []);
+  const habitHistory = useMemo(() => ({ [todayKey]: habits }), [habits, todayKey]);
+  const totalXp = stats?.total_points ?? 0;
+  const levelProgress = useMemo(() => getLevelProgress(totalXp), [totalXp]);
   const previousLevelRef = useRef(levelProgress.level);
 
   useEffect(() => {
@@ -53,59 +113,365 @@ export default function App() {
     if (levelProgress.level > previousLevel) {
       setEvolution({
         level: levelProgress.level,
-        xp: earnedXp,
+        xp: totalXp,
       });
     }
 
     previousLevelRef.current = levelProgress.level;
-  }, [earnedXp, levelProgress.level]);
+  }, [levelProgress.level, totalXp]);
 
-  const goLogin = () => setScreen(screens.login);
-  const goHome = () => setScreen(screens.home);
-  const goTab = (tab) => setScreen(screens[tab] ?? screens.home);
-  const setHabitValues = (dateKey, id, updates) => {
-    setHabitHistory((current) => {
-      const dayHabits = current[dateKey] ?? cloneHabits(initialHabits);
+  const clearUserData = () => {
+    setAuthSession(null);
+    setProfile(null);
+    setStats(null);
+    setPlant(null);
+    setHabits([]);
+    setRecommendations([]);
+    setCompletionState({});
+    setActionError('');
+    setRecommendationsError('');
+  };
 
-      return {
-        ...current,
-        [dateKey]: dayHabits.map((habit) =>
-          habit.id === id ? { ...habit, ...updates } : habit
-        ),
-      };
+  const fetchRecommendationCards = async (session) => {
+    try {
+      const response = await getHabitRecommendations({
+        idToken: session.idToken,
+        uid: session.uid,
+        limit: 4,
+      });
+
+      setRecommendationsError('');
+      return (response?.recommendations || []).map((recommendation, index) =>
+        mapRecommendationToCard(recommendation, index)
+      );
+    } catch (error) {
+      setRecommendationsError(error.message || 'AI suggestions could not be loaded.');
+      return [];
+    }
+  };
+
+  const fetchHabitsWithStreaks = async (session, nextCompletionState = completionState) => {
+    const response = await getUserHabits({
+      idToken: session.idToken,
+      uid: session.uid,
+    });
+    const backendHabits = response?.habits || [];
+    const streakResults = await Promise.allSettled(
+      backendHabits.map((habit) =>
+        getHabitStreak({
+          idToken: session.idToken,
+          habitId: habit.habit_id,
+          uid: session.uid,
+        })
+      )
+    );
+
+    return backendHabits.map((habit, index) => {
+      const completion = nextCompletionState[habit.habit_id];
+      const streak = streakResults[index]?.status === 'fulfilled'
+        ? streakResults[index].value?.current_streak
+        : undefined;
+
+      return mapBackendHabitToUi(habit, {
+        checked: completion?.checked,
+        streak,
+        pointsEarned: completion?.pointsEarned,
+      });
     });
   };
-  const addHabit = (startDateKey, draft) => {
-    const newHabit = createCustomHabit(draft);
 
-    setHabitHistory((current) =>
-      Object.keys(current)
-        .sort((first, second) => first.localeCompare(second))
-        .reduce((next, dateKey) => {
-          const dayHabits = current[dateKey] ?? cloneHabits(initialHabits);
+  const refreshSessionData = async (session, nextCompletionState = completionState) => {
+    setRecommendationsLoading(true);
 
-          next[dateKey] =
-            dateKey >= startDateKey ? [...dayHabits, { ...newHabit }] : dayHabits;
+    try {
+      const [nextProfile, nextStats, nextPlant, nextHabits, nextRecommendations] =
+        await Promise.all([
+          getUserProfile({
+            idToken: session.idToken,
+            uid: session.uid,
+          }),
+          getUserStats({
+            idToken: session.idToken,
+            uid: session.uid,
+          }),
+          getPlant({
+            idToken: session.idToken,
+            uid: session.uid,
+          }),
+          fetchHabitsWithStreaks(session, nextCompletionState),
+          fetchRecommendationCards(session),
+        ]);
 
-          return next;
-        }, {})
-    );
+      setProfile(nextProfile);
+      setStats(nextStats);
+      setPlant(nextPlant);
+      setHabits(nextHabits);
+      setRecommendations(nextRecommendations);
+    } finally {
+      setRecommendationsLoading(false);
+    }
   };
-  const deleteHabit = (startDateKey, id) => {
-    setHabitHistory((current) =>
-      Object.keys(current)
-        .sort((first, second) => first.localeCompare(second))
-        .reduce((next, dateKey) => {
-          const dayHabits = current[dateKey] ?? cloneHabits(initialHabits);
 
-          next[dateKey] =
-            dateKey >= startDateKey
-              ? dayHabits.filter((habit) => habit.id !== id)
-              : dayHabits;
+  const goLogin = () => {
+    setAuthError('');
+    setForgotError('');
+    setForgotNotice('');
+    setScreen(screens.login);
+  };
 
-          return next;
-        }, {})
-    );
+  const goTab = (tab) => setScreen(screens[tab] ?? screens.home);
+
+  const handleLogin = async () => {
+    const email = normalizeEmail(loginForm.email);
+    const password = loginForm.password;
+
+    if (!email || !password) {
+      setAuthError('Email and password are required.');
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthError('');
+    setAuthNotice('');
+
+    try {
+      const identity = await signInWithEmailAndPassword(email, password);
+      const session = toSession(identity);
+
+      setAuthSession(session);
+      await refreshSessionData(session, {});
+      setCompletionState({});
+      setScreen(screens.home);
+    } catch (error) {
+      setAuthError(error.message);
+      clearUserData();
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    const displayName = registerForm.displayName.trim();
+    const email = normalizeEmail(registerForm.email);
+    const password = registerForm.password;
+    const confirmPassword = registerForm.confirmPassword;
+
+    if (!displayName || !email || !password || !confirmPassword) {
+      setAuthError('Please fill in all fields.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setAuthError('Passwords do not match.');
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthError('');
+    setAuthNotice('');
+
+    try {
+      await registerUser({
+        email,
+        password,
+        display_name: displayName,
+      });
+
+      const identity = await signInWithEmailAndPassword(email, password);
+      const session = toSession(identity);
+
+      setAuthSession(session);
+      setLoginForm({
+        email,
+        password,
+      });
+      await refreshSessionData(session, {});
+      setCompletionState({});
+      setRegisterForm(createRegisterForm());
+      setScreen(screens.home);
+    } catch (error) {
+      setAuthError(error.message);
+      if (error.message.includes('Firebase Web API key')) {
+        setAuthNotice(
+          'The backend account may have been created, but frontend sign-in still needs a valid Firebase Web API key.'
+        );
+      }
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const email = normalizeEmail(forgotEmail);
+
+    if (!email) {
+      setForgotError('Please enter your email address.');
+      return;
+    }
+
+    setForgotBusy(true);
+    setForgotError('');
+    setForgotNotice('');
+
+    try {
+      await sendPasswordResetEmail(email);
+      setForgotEmail('');
+      setAuthNotice('Password reset email sent. Check your inbox.');
+      setScreen(screens.login);
+    } catch (error) {
+      setForgotError(error.message);
+    } finally {
+      setForgotBusy(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setLogoutBusy(true);
+
+    try {
+      await logoutUser();
+    } catch {
+      // Logout is client-driven; backend failure should not block sign-out.
+    } finally {
+      clearUserData();
+      setLoginForm(createLoginForm());
+      setRegisterForm(createRegisterForm());
+      setForgotEmail('');
+      setAuthNotice('Signed out successfully.');
+      setLogoutBusy(false);
+      setScreen(screens.login);
+    }
+  };
+
+  const handleAddHabit = async (_, source) => {
+    if (!authSession || actionBusy) {
+      return;
+    }
+
+    const payload = buildHabitCreatePayload(source);
+    if (!payload.name) {
+      setActionError('Habit name is required.');
+      return;
+    }
+
+    setActionBusy(true);
+    setActionError('');
+
+    try {
+      await createHabit({
+        idToken: authSession.idToken,
+        payload,
+      });
+
+      const [nextHabits, nextRecommendations] = await Promise.all([
+        fetchHabitsWithStreaks(authSession, completionState),
+        fetchRecommendationCards(authSession),
+      ]);
+
+      setHabits(nextHabits);
+      setRecommendations(nextRecommendations);
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleDeleteHabit = async (_, habitId) => {
+    if (!authSession || actionBusy) {
+      return;
+    }
+
+    setActionBusy(true);
+    setActionError('');
+
+    try {
+      await deleteHabit({
+        idToken: authSession.idToken,
+        habitId,
+      });
+
+      setCompletionState((current) => {
+        const nextState = { ...current };
+        delete nextState[habitId];
+        return nextState;
+      });
+      setHabits((current) => current.filter((habit) => habit.id !== habitId));
+      setRecommendations(await fetchRecommendationCards(authSession));
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCompleteHabit = async (habitId) => {
+    if (!authSession || actionBusy) {
+      return false;
+    }
+
+    setActionBusy(true);
+    setActionError('');
+
+    try {
+      const completion = await completeHabit({
+        idToken: authSession.idToken,
+        habitId,
+        payload: {
+          notes: 'Completed from Bloomy mobile app',
+        },
+      });
+      const [nextStats, nextPlant, nextStreak] = await Promise.all([
+        getUserStats({
+          idToken: authSession.idToken,
+          uid: authSession.uid,
+        }),
+        getPlant({
+          idToken: authSession.idToken,
+          uid: authSession.uid,
+        }),
+        getHabitStreak({
+          idToken: authSession.idToken,
+          habitId,
+          uid: authSession.uid,
+        }).catch(() => null),
+      ]);
+
+      const nextHabitStreak =
+        nextStreak?.current_streak ?? completion.current_streak ?? 1;
+      const pointsEarned = completion.points_earned ?? 10;
+
+      setCompletionState((current) => ({
+        ...current,
+        [habitId]: {
+          checked: true,
+          pointsEarned,
+          streak: nextHabitStreak,
+        },
+      }));
+      setHabits((current) =>
+        current.map((habit) =>
+          habit.id === habitId
+            ? {
+                ...habit,
+                checked: true,
+                streak: nextHabitStreak,
+                progress: 100,
+                xp: pointsEarned,
+              }
+            : habit
+        )
+      );
+      setStats(nextStats);
+      setPlant(nextPlant);
+
+      return true;
+    } catch (error) {
+      setActionError(error.message);
+      return false;
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   let currentScreen = null;
@@ -139,17 +505,34 @@ export default function App() {
   }
 
   if (screen === screens.onboardingClarity) {
-    currentScreen = (
-      <OnboardingScreen page="clarity" onGetStarted={goLogin} />
-    );
+    currentScreen = <OnboardingScreen page="clarity" onGetStarted={goLogin} />;
   }
 
   if (screen === screens.login) {
     currentScreen = (
       <LoginScreen
-        onLogin={goHome}
-        onForgot={() => setScreen(screens.forgot)}
-        onSignUp={() => setScreen(screens.register)}
+        email={loginForm.email}
+        errorMessage={authError}
+        isSubmitting={authBusy}
+        noticeMessage={authNotice}
+        onChangeEmail={(email) =>
+          setLoginForm((current) => ({ ...current, email }))
+        }
+        onChangePassword={(password) =>
+          setLoginForm((current) => ({ ...current, password }))
+        }
+        onForgot={() => {
+          setAuthError('');
+          setAuthNotice('');
+          setScreen(screens.forgot);
+        }}
+        onLogin={handleLogin}
+        onSignUp={() => {
+          setAuthError('');
+          setAuthNotice('');
+          setScreen(screens.register);
+        }}
+        password={loginForm.password}
       />
     );
   }
@@ -157,24 +540,41 @@ export default function App() {
   if (screen === screens.forgot) {
     currentScreen = (
       <ForgotPasswordScreen
+        email={forgotEmail}
+        errorMessage={forgotError}
+        isSubmitting={forgotBusy}
+        noticeMessage={forgotNotice}
         onBack={goLogin}
-        onVerify={() => setScreen(screens.verify)}
+        onChangeEmail={setForgotEmail}
+        onVerify={handleForgotPassword}
       />
-    );
-  }
-
-  if (screen === screens.verify) {
-    currentScreen = (
-      <VerifyScreen onBack={() => setScreen(screens.forgot)} onVerify={goLogin} />
     );
   }
 
   if (screen === screens.register) {
     currentScreen = (
       <RegisterScreen
+        confirmPassword={registerForm.confirmPassword}
+        displayName={registerForm.displayName}
+        email={registerForm.email}
+        errorMessage={authError}
+        isSubmitting={authBusy}
         onBack={goLogin}
-        onRegister={goHome}
+        onChangeConfirmPassword={(confirmPassword) =>
+          setRegisterForm((current) => ({ ...current, confirmPassword }))
+        }
+        onChangeDisplayName={(displayName) =>
+          setRegisterForm((current) => ({ ...current, displayName }))
+        }
+        onChangeEmail={(email) =>
+          setRegisterForm((current) => ({ ...current, email }))
+        }
+        onChangePassword={(password) =>
+          setRegisterForm((current) => ({ ...current, password }))
+        }
+        onRegister={handleRegister}
         onSignIn={goLogin}
+        password={registerForm.password}
       />
     );
   }
@@ -182,10 +582,17 @@ export default function App() {
   if (screen === screens.home) {
     currentScreen = (
       <HomeScreen
+        actionError={actionError}
         habitHistory={habitHistory}
-        habits={todayHabits}
-        onAddHabit={addHabit}
+        habits={habits}
+        onAddHabit={handleAddHabit}
         onTabPress={goTab}
+        plant={plant}
+        profile={profile}
+        recommendations={recommendations}
+        recommendationsError={recommendationsError}
+        recommendationsLoading={recommendationsLoading}
+        stats={stats}
         todayKey={todayKey}
       />
     );
@@ -194,18 +601,30 @@ export default function App() {
   if (screen === screens.habits) {
     currentScreen = (
       <HabitsScreen
+        actionBusy={actionBusy}
+        actionError={actionError}
         habitHistory={habitHistory}
-        todayKey={todayKey}
-        onAddHabit={addHabit}
-        onDeleteHabit={deleteHabit}
-        onSetHabitValues={setHabitValues}
+        onAddHabit={handleAddHabit}
+        onCompleteHabit={handleCompleteHabit}
+        onDeleteHabit={handleDeleteHabit}
         onTabPress={goTab}
+        todayKey={todayKey}
       />
     );
   }
 
   if (screen === screens.profile) {
-    currentScreen = <ProfileScreen habits={todayHabits} onTabPress={goTab} />;
+    currentScreen = (
+      <ProfileScreen
+        habits={habits}
+        logoutBusy={logoutBusy}
+        onLogout={handleLogout}
+        onTabPress={goTab}
+        plant={plant}
+        profile={profile}
+        stats={stats}
+      />
+    );
   }
 
   return (
@@ -215,7 +634,7 @@ export default function App() {
       <EvolutionModal
         visible={Boolean(evolution)}
         level={evolution?.level ?? levelProgress.level}
-        xp={evolution?.xp ?? earnedXp}
+        xp={evolution?.xp ?? totalXp}
         onClose={() => setEvolution(null)}
       />
     </View>

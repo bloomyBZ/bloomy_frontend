@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import AuthHeader from '../components/AuthHeader';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import InputField from '../components/InputField';
+import NoticeBanner from '../components/NoticeBanner';
 import Screen, { HomeIndicator } from '../components/Screen';
 import { colors } from '../theme';
 
@@ -15,7 +16,21 @@ function SocialButton({ icon, title }) {
   );
 }
 
-export default function RegisterScreen({ onBack, onRegister, onSignIn }) {
+export default function RegisterScreen({
+  onBack,
+  onRegister,
+  onSignIn,
+  displayName,
+  email,
+  password,
+  confirmPassword,
+  onChangeDisplayName,
+  onChangeEmail,
+  onChangePassword,
+  onChangeConfirmPassword,
+  errorMessage,
+  isSubmitting,
+}) {
   return (
     <Screen scroll contentStyle={styles.content}>
       <AuthHeader title="Register" onBack={onBack} />
@@ -29,35 +44,50 @@ export default function RegisterScreen({ onBack, onRegister, onSignIn }) {
 
       <View style={styles.form}>
         <InputField
-          label="Mobile number"
-          prefix="+91"
-          defaultValue="1712345678"
-          keyboardType="phone-pad"
+          label="Display name"
+          value={displayName}
+          onChangeText={onChangeDisplayName}
+          placeholder="Betul"
+          right={null}
+          autoCapitalize="words"
         />
         <InputField
           label="Email"
-          defaultValue="abc12@gmail.com"
+          value={email}
+          onChangeText={onChangeEmail}
+          placeholder="you@example.com"
           keyboardType="email-address"
           right={null}
         />
         <InputField
           label="Password"
-          defaultValue="password123"
+          value={password}
+          onChangeText={onChangePassword}
+          placeholder="Create a password"
           secure
           right="eye"
         />
         <InputField
           label="Confirm password"
-          defaultValue="password123"
+          value={confirmPassword}
+          onChangeText={onChangeConfirmPassword}
+          placeholder="Repeat your password"
           secure
           right="eye"
         />
+
+        <NoticeBanner message={errorMessage} tone="error" />
       </View>
 
-      <PrimaryButton title="Sign Up" onPress={onRegister} style={styles.button} />
+      <PrimaryButton
+        title={isSubmitting ? 'Creating account...' : 'Sign Up'}
+        onPress={onRegister}
+        style={styles.button}
+        disabled={isSubmitting}
+      />
 
       <View style={styles.signinRow}>
-        <Text style={styles.muted}>Don't have an account? </Text>
+        <Text style={styles.muted}>Already have an account? </Text>
         <Pressable onPress={onSignIn}>
           <Text style={styles.link}>Sign in</Text>
         </Pressable>
