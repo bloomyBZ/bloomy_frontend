@@ -24,6 +24,7 @@ export default function PageLayout({
   subtitle,
   activeTab,
   onTabPress,
+  onNotificationPress,
   avatarId,
   avatarFallbackText,
   children,
@@ -55,6 +56,10 @@ export default function PageLayout({
           </View>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="Open notifications"
+            accessibilityState={{ disabled: !onNotificationPress }}
+            disabled={!onNotificationPress}
+            onPress={onNotificationPress}
             style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
           >
             <BellIcon />

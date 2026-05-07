@@ -157,6 +157,7 @@ export default function HabitsScreen({
   onUncompleteHabit,
   onUpdateHabit,
   onUndoDeleteHabit,
+  onNotificationPress,
   onTabPress,
   actionError,
   actionNotice,
@@ -420,6 +421,7 @@ export default function HabitsScreen({
         activeTab="habits"
         avatarFallbackText={(profile?.display_name || 'B').charAt(0).toUpperCase()}
         avatarId={profile?.avatar_id}
+        onNotificationPress={onNotificationPress}
         onTabPress={onTabPress}
         scroll
         contentStyle={styles.content}

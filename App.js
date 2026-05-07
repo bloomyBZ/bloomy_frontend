@@ -1,6 +1,16 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import {
+  Animated,
+  BackHandler,
+  Easing,
+  Platform,
+  Pressable,
+  StatusBar as NativeStatusBar,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import {
   completeHabit,
   createHabit,
@@ -9,6 +19,7 @@ import {
   getHabitStreak,
   getPlant,
   getUserHabits,
+  getUserNotifications,
   getUserProfile,
   getUserStats,
   logoutUser,
@@ -16,6 +27,7 @@ import {
   undoDeleteHabit,
   uncompleteHabit,
   updateHabit,
+  updateUserNotifications,
   updateUserProfile,
 } from './src/api/bloomyApi';
 import {
@@ -29,6 +41,7 @@ import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import HabitsScreen from './src/screens/HabitsScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
@@ -98,6 +111,7 @@ export default function App() {
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [recommendationsError, setRecommendationsError] = useState('');
   const [authError, setAuthError] = useState('');
@@ -108,13 +122,21 @@ export default function App() {
   const [actionNotice, setActionNotice] = useState('');
   const [deletedHabitId, setDeletedHabitId] = useState(null);
   const [evolution, setEvolution] = useState(null);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
 
   const [todayKey, setTodayKey] = useState(() => getDateKey(new Date()));
+  const { width: windowWidth } = useWindowDimensions();
   const habitHistory = useMemo(() => ({ [todayKey]: habits }), [habits, todayKey]);
   const totalXp = stats?.total_points ?? 0;
   const levelProgress = useMemo(() => getLevelProgress(totalXp), [totalXp]);
   const previousLevelRef = useRef(levelProgress.level);
   const previousTodayKeyRef = useRef(todayKey);
+  const notificationOverlayOpacity = useRef(new Animated.Value(0)).current;
+  const notificationPanelTranslateX = useRef(new Animated.Value(420)).current;
+  const notificationPanelWidth = Math.min(392, Math.max(windowWidth - 18, 300));
+  const notificationPanelTopInset =
+    Platform.OS === 'ios' ? 48 : (NativeStatusBar.currentHeight || 0) + 10;
+  const notificationPanelBottomInset = Platform.OS === 'ios' ? 12 : 8;
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -151,7 +173,23 @@ export default function App() {
     setDeletedHabitId(null);
     setRecommendationsError('');
     setAvatarBusy(false);
+    setNotificationsBusy(false);
+    setNotificationsVisible(false);
+    notificationOverlayOpacity.setValue(0);
+    notificationPanelTranslateX.setValue(notificationPanelWidth + 32);
   };
+
+  useEffect(() => {
+    if (!notificationsVisible) {
+      notificationOverlayOpacity.setValue(0);
+      notificationPanelTranslateX.setValue(notificationPanelWidth + 32);
+    }
+  }, [
+    notificationOverlayOpacity,
+    notificationPanelTranslateX,
+    notificationPanelWidth,
+    notificationsVisible,
+  ]);
 
   const fetchRecommendationCards = async (session) => {
     try {
@@ -205,9 +243,13 @@ export default function App() {
     setRecommendationsLoading(true);
 
     try {
-      const [nextProfile, nextStats, nextPlant, nextHabits, nextRecommendations] =
+      const [nextProfile, nextNotifications, nextStats, nextPlant, nextHabits, nextRecommendations] =
         await Promise.all([
           getUserProfile({
+            idToken: session.idToken,
+            uid: session.uid,
+          }),
+          getUserNotifications({
             idToken: session.idToken,
             uid: session.uid,
           }),
@@ -223,7 +265,10 @@ export default function App() {
           fetchRecommendationCards(session),
         ]);
 
-      setProfile(nextProfile);
+      setProfile({
+        ...nextProfile,
+        ...nextNotifications,
+      });
       setStats(nextStats);
       setPlant(nextPlant);
       setHabits(nextHabits);
@@ -257,6 +302,69 @@ export default function App() {
   };
 
   const goTab = (tab) => setScreen(screens[tab] ?? screens.home);
+
+  const openNotifications = () => {
+    if (notificationsVisible) {
+      return;
+    }
+
+    notificationOverlayOpacity.setValue(0);
+    notificationPanelTranslateX.setValue(notificationPanelWidth + 32);
+    setNotificationsVisible(true);
+
+    Animated.parallel([
+      Animated.timing(notificationOverlayOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(notificationPanelTranslateX, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeNotifications = () => {
+    if (!notificationsVisible) {
+      return;
+    }
+
+    Animated.parallel([
+      Animated.timing(notificationOverlayOpacity, {
+        toValue: 0,
+        duration: 180,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(notificationPanelTranslateX, {
+        toValue: notificationPanelWidth + 32,
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setNotificationsVisible(false);
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!notificationsVisible) {
+      return undefined;
+    }
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeNotifications();
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [notificationsVisible]);
 
   const handleLogin = async () => {
     const email = normalizeEmail(loginForm.email);
@@ -662,6 +770,39 @@ export default function App() {
     }
   };
 
+  const handleUpdateNotifications = async (payload) => {
+    if (!authSession || notificationsBusy) {
+      return false;
+    }
+
+    setNotificationsBusy(true);
+    setActionError('');
+
+    try {
+      const updatedNotifications = await updateUserNotifications({
+        idToken: authSession.idToken,
+        uid: authSession.uid,
+        payload,
+      });
+
+      setProfile((current) =>
+        current
+          ? {
+              ...current,
+              ...updatedNotifications,
+            }
+          : updatedNotifications
+      );
+
+      return true;
+    } catch (error) {
+      setActionError(error.message);
+      return false;
+    } finally {
+      setNotificationsBusy(false);
+    }
+  };
+
   const handleUndoDeleteHabit = async (habitId) => {
     if (!authSession || actionBusy || !habitId) {
       return;
@@ -805,6 +946,7 @@ export default function App() {
         habitHistory={habitHistory}
         habits={habits}
         onAddHabit={handleAddHabit}
+        onNotificationPress={openNotifications}
         onRefreshRecommendations={handleRefreshRecommendations}
         onTabPress={goTab}
         plant={plant}
@@ -829,6 +971,7 @@ export default function App() {
         onAddHabit={handleAddHabit}
         onCompleteHabit={handleCompleteHabit}
         onDeleteHabit={handleDeleteHabit}
+        onNotificationPress={openNotifications}
         onTabPress={goTab}
         onUncompleteHabit={handleUncompleteHabit}
         onUndoDeleteHabit={handleUndoDeleteHabit}
@@ -847,8 +990,11 @@ export default function App() {
         habits={habits}
         logoutBusy={logoutBusy}
         onLogout={handleLogout}
+        onNotificationPress={openNotifications}
+        onUpdateNotifications={handleUpdateNotifications}
         onSelectAvatar={handleSelectAvatar}
         onTabPress={goTab}
+        notificationsSaving={notificationsBusy}
         plant={plant}
         profile={profile}
         stats={stats}
@@ -860,6 +1006,36 @@ export default function App() {
     <View style={styles.app}>
       <StatusBar style="dark" />
       {currentScreen}
+      {notificationsVisible ? (
+        <View pointerEvents="box-none" style={styles.notificationsOverlay}>
+          <Animated.View
+            pointerEvents="box-none"
+            style={[styles.notificationsBackdrop, { opacity: notificationOverlayOpacity }]}
+          >
+            <Pressable style={styles.backdropTouchArea} onPress={closeNotifications} />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.notificationsPanelWrap,
+              {
+                paddingTop: notificationPanelTopInset,
+                paddingBottom: notificationPanelBottomInset,
+                width: notificationPanelWidth,
+                transform: [{ translateX: notificationPanelTranslateX }],
+              },
+            ]}
+          >
+            <NotificationsScreen
+              actionError={actionError}
+              habits={habits}
+              notificationsSaving={notificationsBusy}
+              onClose={closeNotifications}
+              onUpdateNotifications={handleUpdateNotifications}
+              profile={profile}
+            />
+          </Animated.View>
+        </View>
+      ) : null}
       <EvolutionModal
         visible={Boolean(evolution)}
         level={evolution?.level ?? levelProgress.level}
@@ -874,5 +1050,23 @@ const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  notificationsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
+  notificationsBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(17, 24, 39, 0.22)',
+  },
+  backdropTouchArea: {
+    flex: 1,
+  },
+  notificationsPanelWrap: {
+    height: '100%',
+    paddingVertical: 10,
+    paddingLeft: 12,
   },
 });

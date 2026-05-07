@@ -1,4 +1,4 @@
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { SecondaryButton } from '../components/Button';
 import AvatarBadge from '../components/AvatarBadge';
 import NoticeBanner from '../components/NoticeBanner';
@@ -42,6 +42,12 @@ const growthPaletteByCategory = {
   },
 };
 
+const notificationTimeOptions = [
+  { key: 'morning', label: 'Morning' },
+  { key: 'afternoon', label: 'Afternoon' },
+  { key: 'evening', label: 'Evening' },
+];
+
 function getGrowthPalette(category) {
   return growthPaletteByCategory[category] ?? growthPaletteByCategory.Mind;
 }
@@ -53,8 +59,11 @@ export default function ProfileScreen({
   plant,
   onLogout,
   logoutBusy,
+  onNotificationPress,
   onTabPress,
   onSelectAvatar,
+  onUpdateNotifications,
+  notificationsSaving,
   avatarSaving,
   actionError,
 }) {
@@ -72,6 +81,10 @@ export default function ProfileScreen({
   const nextXp = levelProgress.nextLevelXp - levelProgress.currentLevelXp;
   const displayName = getDisplayName(profile);
   const healthScore = plant?.health_score ?? stats?.plant_health ?? 0;
+  const notificationsEnabled = profile?.notifications_enabled ?? true;
+  const notificationTime = profile?.notification_time || 'evening';
+  const streakAlertsEnabled = profile?.streak_alerts_enabled ?? true;
+  const eveningReflectionEnabled = profile?.evening_reflection_enabled ?? false;
 
   return (
     <PageLayout
@@ -80,6 +93,7 @@ export default function ProfileScreen({
       activeTab="profile"
       avatarFallbackText={displayName.charAt(0).toUpperCase() || 'B'}
       avatarId={profile?.avatar_id}
+      onNotificationPress={onNotificationPress}
       onTabPress={onTabPress}
       scroll
       contentStyle={styles.content}
@@ -134,6 +148,84 @@ export default function ProfileScreen({
         <StatCard label="Total XP" value={`${totalXp}`} detail="all time" />
         <StatCard label="Done" value={`${completionRate}%`} detail="completion" />
         <StatCard label="Best streak" value={`${longestStreak}`} detail="days" />
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Notifications</Text>
+        <Text style={styles.sectionMeta}>
+          {notificationsSaving ? 'Saving...' : 'Synced with backend'}
+        </Text>
+      </View>
+
+      <View style={styles.notificationCard}>
+        <NotificationRow
+          description="Receive your main Bloomy reminder for planned habits."
+          disabled={notificationsSaving}
+          onToggle={() =>
+            onUpdateNotifications?.({
+              notifications_enabled: !notificationsEnabled,
+            })
+          }
+          title="Habit reminders"
+          value={notificationsEnabled}
+        />
+
+        <View style={styles.notificationDivider} />
+
+        <Text style={styles.notificationLabel}>Reminder time</Text>
+        <View style={styles.notificationTimeRow}>
+          {notificationTimeOptions.map((option) => {
+            const active = notificationTime === option.key;
+
+            return (
+              <Pressable
+                accessibilityRole="button"
+                key={option.key}
+                onPress={() =>
+                  notificationsSaving || !notificationsEnabled
+                    ? undefined
+                    : onUpdateNotifications?.({ notification_time: option.key })
+                }
+                style={({ pressed }) => [
+                  styles.timeChip,
+                  active && styles.timeChipActive,
+                  (!notificationsEnabled || notificationsSaving) && styles.timeChipDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.timeChipText, active && styles.timeChipTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.notificationDivider} />
+
+        <NotificationRow
+          description="Get a nudge when your streak is close to slipping."
+          disabled={notificationsSaving || !notificationsEnabled}
+          onToggle={() =>
+            onUpdateNotifications?.({
+              streak_alerts_enabled: !streakAlertsEnabled,
+            })
+          }
+          title="Streak alerts"
+          value={streakAlertsEnabled}
+        />
+
+        <NotificationRow
+          description="Send a short evening check-in to close the day mindfully."
+          disabled={notificationsSaving || !notificationsEnabled}
+          onToggle={() =>
+            onUpdateNotifications?.({
+              evening_reflection_enabled: !eveningReflectionEnabled,
+            })
+          }
+          title="Evening reflection"
+          value={eveningReflectionEnabled}
+        />
       </View>
 
       <View style={styles.sectionHeader}>
@@ -252,6 +344,25 @@ function GrowthMetric({ label, value }) {
     <View style={styles.growthMetric}>
       <Text style={styles.growthMetricValue}>{value}</Text>
       <Text style={styles.growthMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function NotificationRow({ title, description, value, onToggle, disabled }) {
+  return (
+    <View style={styles.notificationRow}>
+      <View style={styles.notificationCopy}>
+        <Text style={styles.notificationTitle}>{title}</Text>
+        <Text style={styles.notificationBody}>{description}</Text>
+      </View>
+      <Switch
+        disabled={disabled}
+        ios_backgroundColor="#DCE5E1"
+        onValueChange={onToggle}
+        thumbColor={value ? '#FFFFFF' : '#F8FBFA'}
+        trackColor={{ false: '#DCE5E1', true: '#8FD0B2' }}
+        value={value}
+      />
     </View>
   );
 }
@@ -436,6 +547,75 @@ const styles = StyleSheet.create({
   },
   avatarOptionTextActive: {
     color: colors.greenDark,
+  },
+  notificationCard: {
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    marginBottom: 18,
+    ...shadow,
+  },
+  notificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  notificationCopy: {
+    flex: 1,
+  },
+  notificationTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  notificationBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  notificationDivider: {
+    height: 1,
+    backgroundColor: '#E4ECE8',
+    marginVertical: 14,
+  },
+  notificationLabel: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  notificationTimeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  timeChip: {
+    minHeight: 38,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  timeChipActive: {
+    backgroundColor: '#EAF3FF',
+    borderColor: '#C8D8FF',
+  },
+  timeChipDisabled: {
+    opacity: 0.45,
+  },
+  timeChipText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  timeChipTextActive: {
+    color: colors.blue,
   },
   growthRow: {
     borderRadius: radii.card,

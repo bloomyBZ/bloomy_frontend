@@ -64,6 +64,21 @@ export async function updateUserProfile({ idToken, uid, payload }) {
   });
 }
 
+export async function getUserNotifications({ idToken, uid }) {
+  return requestJson(buildUrl(`/api/users/${uid}/notifications`), {
+    method: 'GET',
+    headers: getAuthHeaders(idToken),
+  });
+}
+
+export async function updateUserNotifications({ idToken, uid, payload }) {
+  return requestJson(buildUrl(`/api/users/${uid}/notifications`), {
+    method: 'PUT',
+    headers: getAuthHeaders(idToken),
+    body: payload,
+  });
+}
+
 export async function deleteUserAccount({ idToken, uid }) {
   return requestJson(buildUrl(`/api/users/${uid}/delete`), {
     method: 'DELETE',

@@ -261,6 +261,7 @@ export default function HomeScreen({
   recommendationsLoading,
   actionError,
   onAddHabit,
+  onNotificationPress,
   onRefreshRecommendations,
   onTabPress,
   todayKey,
@@ -303,6 +304,7 @@ export default function HomeScreen({
       activeTab="home"
       avatarFallbackText={displayName.charAt(0).toUpperCase() || 'B'}
       avatarId={profile?.avatar_id}
+      onNotificationPress={onNotificationPress}
       onTabPress={onTabPress}
       scroll
       contentStyle={styles.scrollContent}
