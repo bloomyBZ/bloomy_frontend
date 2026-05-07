@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import AvatarBadge from './AvatarBadge';
 import { colors } from '../theme';
 
 const topInset = Platform.OS === 'ios' ? 44 : NativeStatusBar.currentHeight || 0;
@@ -23,6 +24,8 @@ export default function PageLayout({
   subtitle,
   activeTab,
   onTabPress,
+  avatarId,
+  avatarFallbackText,
   children,
   scroll = false,
   contentStyle,
@@ -37,9 +40,13 @@ export default function PageLayout({
     <View style={styles.shell}>
       <View style={styles.appBar}>
         <View style={styles.appBarRow}>
-          <View style={styles.avatar}>
-            <View style={styles.avatarLeaf} />
-          </View>
+          <AvatarBadge
+            avatarId={avatarId}
+            fallbackText={avatarFallbackText}
+            size={42}
+            style={styles.avatar}
+            imageStyle={styles.avatarImage}
+          />
           <View style={styles.appBarText}>
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
             <Text style={styles.title} numberOfLines={1}>
@@ -51,6 +58,7 @@ export default function PageLayout({
             style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
           >
             <BellIcon />
+            <View style={styles.notificationBadge} />
           </Pressable>
         </View>
       </View>
@@ -173,21 +181,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.greenDark,
     marginRight: 14,
   },
-  avatarLeaf: {
-    width: 15,
-    height: 22,
-    borderTopLeftRadius: 14,
-    borderBottomRightRadius: 14,
-    backgroundColor: '#A9E5B5',
-    transform: [{ rotate: '38deg' }],
+  avatarImage: {
+    marginTop: 1,
   },
   appBarText: {
     flex: 1,
@@ -239,6 +236,17 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: colors.ink,
     marginTop: 1,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 9,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF7A59',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
   },
   pageContent: {
     paddingHorizontal: 18,

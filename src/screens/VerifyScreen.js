@@ -2,7 +2,7 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import AuthHeader from '../components/AuthHeader';
 import { PrimaryButton } from '../components/Button';
 import { VerifyIllustration } from '../components/Illustrations';
-import Screen, { HomeIndicator } from '../components/Screen';
+import Screen from '../components/Screen';
 import { colors, radii } from '../theme';
 
 export default function VerifyScreen({ onBack, onVerify }) {
@@ -34,7 +34,6 @@ export default function VerifyScreen({ onBack, onVerify }) {
       <PrimaryButton title="Verify" onPress={onVerify} style={styles.button} />
 
       <View style={styles.spacer} />
-      <HomeIndicator />
     </Screen>
   );
 }

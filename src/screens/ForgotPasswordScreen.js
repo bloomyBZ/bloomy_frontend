@@ -4,7 +4,7 @@ import { PrimaryButton } from '../components/Button';
 import { ForgotIllustration } from '../components/Illustrations';
 import InputField from '../components/InputField';
 import NoticeBanner from '../components/NoticeBanner';
-import Screen, { HomeIndicator } from '../components/Screen';
+import Screen from '../components/Screen';
 import { colors } from '../theme';
 
 export default function ForgotPasswordScreen({
@@ -51,7 +51,6 @@ export default function ForgotPasswordScreen({
       />
 
       <View style={styles.spacer} />
-      <HomeIndicator />
     </Screen>
   );
 }

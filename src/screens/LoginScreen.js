@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import InputField from '../components/InputField';
 import NoticeBanner from '../components/NoticeBanner';
-import Screen, { HomeIndicator } from '../components/Screen';
+import Screen from '../components/Screen';
 import { colors } from '../theme';
 
 function SocialButton({ icon, title }) {
@@ -94,7 +94,6 @@ export default function LoginScreen({
       </View>
 
       <View style={styles.spacer} />
-      <HomeIndicator />
     </Screen>
   );
 }

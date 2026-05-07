@@ -10,24 +10,25 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { habitCategories, habitXpOptions } from '../data/habits';
+import {
+  habitCategories,
+  MANUAL_HABIT_XP,
+  manualHabitScheduleOptions,
+} from '../data/habits';
 import { colors, radii, shadow } from '../theme';
 import { PrimaryButton, SecondaryButton } from './Button';
-
-const defaultXp = habitXpOptions.includes(20) ? 20 : habitXpOptions[0];
 
 function createInitialForm() {
   return {
     title: '',
-    schedule: '',
+    schedule: manualHabitScheduleOptions[0],
     category: habitCategories[0],
-    xp: defaultXp,
   };
 }
 
 export default function AddHabitSheet({ visible, dateLabel, onClose, onSubmit }) {
   const [form, setForm] = useState(createInitialForm);
-  const canSubmit = form.title.trim().length > 0 && form.schedule.trim().length > 0;
+  const canSubmit = form.title.trim().length > 0;
 
   useEffect(() => {
     if (!visible) {
@@ -44,7 +45,6 @@ export default function AddHabitSheet({ visible, dateLabel, onClose, onSubmit })
       title: form.title.trim(),
       schedule: form.schedule.trim(),
       category: form.category,
-      xp: form.xp,
     });
     setForm(createInitialForm());
   };
@@ -65,8 +65,8 @@ export default function AddHabitSheet({ visible, dateLabel, onClose, onSubmit })
               <Text style={styles.eyebrow}>New habit</Text>
               <Text style={styles.title}>Add a habit for {dateLabel}</Text>
               <Text style={styles.body}>
-                Pick a name, rhythm, and category. We will add it from this day
-                forward.
+                Pick a name, schedule, and category. You can write the habit's own
+                description later from the detail view.
               </Text>
             </View>
           </View>
@@ -88,16 +88,28 @@ export default function AddHabitSheet({ visible, dateLabel, onClose, onSubmit })
             </Field>
 
             <Field label="Schedule">
-              <TextInput
-                autoCapitalize="sentences"
-                onChangeText={(schedule) =>
-                  setForm((current) => ({ ...current, schedule }))
-                }
-                placeholder="Every evening"
-                placeholderTextColor="#97A39E"
-                style={styles.input}
-                value={form.schedule}
-              />
+              <View style={styles.chipRow}>
+                {manualHabitScheduleOptions.map((schedule) => {
+                  const active = form.schedule === schedule;
+
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      key={schedule}
+                      onPress={() => setForm((current) => ({ ...current, schedule }))}
+                      style={({ pressed }) => [
+                        styles.chip,
+                        active && styles.scheduleChipActive,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={[styles.chipText, active && styles.scheduleChipTextActive]}>
+                        {schedule}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </Field>
 
             <Field label="Category">
@@ -126,27 +138,11 @@ export default function AddHabitSheet({ visible, dateLabel, onClose, onSubmit })
             </Field>
 
             <Field label="Reward XP">
-              <View style={styles.chipRow}>
-                {habitXpOptions.map((xp) => {
-                  const active = form.xp === xp;
-
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      key={xp}
-                      onPress={() => setForm((current) => ({ ...current, xp }))}
-                      style={({ pressed }) => [
-                        styles.chip,
-                        active && styles.xpChipActive,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text style={[styles.chipText, active && styles.xpChipTextActive]}>
-                        +{xp} XP
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              <View style={styles.infoCard}>
+                <Text style={styles.infoTitle}>+{MANUAL_HABIT_XP} XP</Text>
+                <Text style={styles.infoBody}>
+                  Manual habits start with a fixed reward.
+                </Text>
               </View>
             </Field>
           </ScrollView>
@@ -264,9 +260,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.greenSoft,
     borderColor: '#B6DBC9',
   },
-  xpChipActive: {
-    backgroundColor: '#FFF4D7',
-    borderColor: '#F2D289',
+  scheduleChipActive: {
+    backgroundColor: '#EEF4FF',
+    borderColor: '#C5D8FF',
   },
   chipText: {
     color: colors.muted,
@@ -276,8 +272,27 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: colors.greenDark,
   },
-  xpChipTextActive: {
+  scheduleChipTextActive: {
+    color: '#2854A6',
+  },
+  infoCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F2D289',
+    backgroundColor: '#FFF9E8',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  infoTitle: {
     color: '#85620D',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  infoBody: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
   },
   footer: {
     flexDirection: 'row',

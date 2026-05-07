@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SmallActionButton } from '../components/Button';
+import HabitIdeaModal from '../components/HabitIdeaModal';
 import { BooksArtwork, DeskArtwork } from '../components/Illustrations';
 import PageLayout from '../components/PageLayout';
 import NoticeBanner from '../components/NoticeBanner';
@@ -52,6 +54,42 @@ const suggestedTemplates = [
     schedule: '30 min before bed',
     category: 'Health',
     xp: 30,
+    artwork: 'moon',
+  },
+  {
+    id: 'gratitude-minute',
+    title: 'Gratitude minute',
+    body: 'Name one good thing from the day so your mind ends on a lighter note.',
+    schedule: 'Before sleep',
+    category: 'Mind',
+    xp: 15,
+    artwork: 'books',
+  },
+  {
+    id: 'focus-reset',
+    title: 'Focus reset',
+    body: 'Give one important task ten quiet minutes of full attention.',
+    schedule: 'Midday',
+    category: 'Energy',
+    xp: 20,
+    artwork: 'stretch',
+  },
+  {
+    id: 'tidy-corner',
+    title: 'Tidy one corner',
+    body: 'Reset one tiny part of your space to make the whole room feel lighter.',
+    schedule: 'Anytime',
+    category: 'Home',
+    xp: 15,
+    artwork: 'desk',
+  },
+  {
+    id: 'water-break',
+    title: 'Mindful water break',
+    body: 'Pause for a glass of water and a deep breath before the next task.',
+    schedule: 'Between tasks',
+    category: 'Health',
+    xp: 10,
     artwork: 'moon',
   },
 ];
@@ -121,7 +159,7 @@ function TodayHabitRow({ habit }) {
   );
 }
 
-function StarterCard({ added, onAdd, template }) {
+function StarterCard({ added, onAdd, onInspect, template }) {
   return (
     <View style={[styles.starterCard, added && styles.starterCardAdded]}>
       <View style={styles.artColumn}>{renderArtwork(template.artwork)}</View>
@@ -148,6 +186,13 @@ function StarterCard({ added, onAdd, template }) {
         </View>
 
         <View style={styles.cardFooter}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onInspect}
+            style={({ pressed }) => [styles.detailLink, pressed && styles.pressed]}
+          >
+            <Text style={styles.detailLinkText}>View details</Text>
+          </Pressable>
           <SmallActionButton
             onPress={added ? undefined : onAdd}
             style={[styles.cardButton, added && styles.cardButtonAdded]}
@@ -216,9 +261,11 @@ export default function HomeScreen({
   recommendationsLoading,
   actionError,
   onAddHabit,
+  onRefreshRecommendations,
   onTabPress,
   todayKey,
 }) {
+  const [selectedIdea, setSelectedIdea] = useState(null);
   const completedCount = getCompletedCount(habits);
   const availableXp = getAvailableXp(habits);
   const earnedXp = getEarnedXp(habits);
@@ -254,6 +301,8 @@ export default function HomeScreen({
       title={`Welcome ${displayName}!`}
       subtitle={todayLabel}
       activeTab="home"
+      avatarFallbackText={displayName.charAt(0).toUpperCase() || 'B'}
+      avatarId={profile?.avatar_id}
       onTabPress={onTabPress}
       scroll
       contentStyle={styles.scrollContent}
@@ -326,10 +375,19 @@ export default function HomeScreen({
       </View>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Suggested habits</Text>
-        <Text style={styles.sectionAction}>
-          {recommendationsLoading ? 'Loading' : `${suggestionLibrary.length} ready`}
-        </Text>
+        <View>
+          <Text style={styles.sectionTitle}>AI-picked habits</Text>
+          <Text style={styles.sectionCaption}>Suggested by Bloomy AI for your routine</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onRefreshRecommendations}
+          style={({ pressed }) => [styles.refreshChip, pressed && styles.pressed]}
+        >
+          <Text style={styles.refreshChipText}>
+            {recommendationsLoading ? 'Loading' : 'Refresh'}
+          </Text>
+        </Pressable>
       </View>
 
       <NoticeBanner message={recommendationsError} tone="error" style={styles.notice} />
@@ -339,13 +397,6 @@ export default function HomeScreen({
         recommendationCount={suggestionLibrary.length}
       />
 
-      <View style={styles.libraryHeader}>
-        <Text style={styles.libraryTitle}>Habit ideas</Text>
-        <Text style={styles.libraryBody}>
-          Pick any habit you like and add it to your list for today.
-        </Text>
-      </View>
-
       {suggestionLibrary.map((template) => {
         const added = addedHabitSet.has(getTemplateSignature(template));
 
@@ -354,10 +405,29 @@ export default function HomeScreen({
             added={added}
             key={template.id}
             onAdd={() => onAddHabit?.(todayKey, template)}
+            onInspect={() => setSelectedIdea(template)}
             template={template}
           />
         );
       })}
+
+      <HabitIdeaModal
+        added={selectedIdea ? addedHabitSet.has(getTemplateSignature(selectedIdea)) : false}
+        idea={selectedIdea}
+        onAdd={() => {
+          if (selectedIdea) {
+            onAddHabit?.(todayKey, selectedIdea);
+            setSelectedIdea(null);
+          }
+        }}
+        onClose={() => setSelectedIdea(null)}
+        primaryLabel={
+          selectedIdea && addedHabitSet.has(getTemplateSignature(selectedIdea))
+            ? 'Already added'
+            : 'Add this habit'
+        }
+        visible={Boolean(selectedIdea)}
+      />
     </PageLayout>
   );
 }
@@ -533,6 +603,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
+  sectionCaption: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
   sectionTitle: {
     color: colors.ink,
     fontSize: 17,
@@ -596,19 +672,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 16,
   },
-  libraryHeader: {
-    marginBottom: 10,
+  refreshChip: {
+    minHeight: 34,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.greenSoft,
+    borderWidth: 1,
+    borderColor: '#C8DED2',
   },
-  libraryTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  libraryBody: {
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
+  refreshChipText: {
+    color: colors.greenDark,
+    fontSize: 12,
+    fontWeight: '900',
   },
   starterCard: {
     width: '100%',
@@ -806,6 +883,16 @@ const styles = StyleSheet.create({
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  detailLink: {
+    paddingVertical: 8,
+  },
+  detailLinkText: {
+    color: colors.green,
+    fontSize: 12,
+    fontWeight: '800',
   },
   cardButton: {
     minHeight: 32,
@@ -816,5 +903,8 @@ const styles = StyleSheet.create({
   },
   cardButtonAddedText: {
     color: colors.greenDark,
+  },
+  pressed: {
+    opacity: 0.75,
   },
 });

@@ -3,7 +3,7 @@ import AuthHeader from '../components/AuthHeader';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import InputField from '../components/InputField';
 import NoticeBanner from '../components/NoticeBanner';
-import Screen, { HomeIndicator } from '../components/Screen';
+import Screen from '../components/Screen';
 import { colors } from '../theme';
 
 function SocialButton({ icon, title }) {
@@ -29,6 +29,7 @@ export default function RegisterScreen({
   onChangePassword,
   onChangeConfirmPassword,
   errorMessage,
+  noticeMessage,
   isSubmitting,
 }) {
   return (
@@ -77,6 +78,7 @@ export default function RegisterScreen({
         />
 
         <NoticeBanner message={errorMessage} tone="error" />
+        <NoticeBanner message={noticeMessage} tone="success" />
       </View>
 
       <PrimaryButton
@@ -105,7 +107,6 @@ export default function RegisterScreen({
       </View>
 
       <View style={styles.spacer} />
-      <HomeIndicator />
     </Screen>
   );
 }

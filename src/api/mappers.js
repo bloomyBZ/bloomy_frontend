@@ -59,10 +59,6 @@ function normalizeSearchText(value) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function getSearchTokens(value) {
-  return normalizeSearchText(value).split(/[^a-z0-9]+/).filter(Boolean);
-}
-
 function isSameLocalDay(timestamp) {
   if (!timestamp) {
     return false;
@@ -82,6 +78,19 @@ function isSameLocalDay(timestamp) {
   );
 }
 
+function isTodayDateKey(dateKey) {
+  if (!dateKey) {
+    return false;
+  }
+
+  const today = new Date();
+  const safeMonth = `${today.getMonth() + 1}`.padStart(2, '0');
+  const safeDay = `${today.getDate()}`.padStart(2, '0');
+  const todayKey = `${today.getFullYear()}-${safeMonth}-${safeDay}`;
+
+  return dateKey === todayKey;
+}
+
 function getFrequencyLabel(frequency) {
   if (frequency === 'weekly') {
     return 'Every week';
@@ -92,6 +101,15 @@ function getFrequencyLabel(frequency) {
   }
 
   return 'Every day';
+}
+
+function looksLikeScheduleLabel(value) {
+  const trimmedValue = (value || '').trim();
+  if (!trimmedValue) {
+    return false;
+  }
+
+  return trimmedValue.length <= 40 && !/[.!?]$/.test(trimmedValue);
 }
 
 function getHabitProgress(streak, checked) {
@@ -114,24 +132,107 @@ function inferXp(streak, checked, pointsEarned) {
   return 10;
 }
 
+function buildEnglishHabitSummary(name, category, frequency) {
+  const frequencyLabel = getFrequencyLabel(frequency || 'daily').toLowerCase();
+
+  if (category === 'Health') {
+    return `${name} is a gentle ${frequencyLabel} ritual that supports your energy and physical wellbeing without feeling overwhelming.`;
+  }
+
+  if (category === 'Energy') {
+    return `${name} creates a focused ${frequencyLabel} rhythm that helps you build momentum through small, repeatable effort.`;
+  }
+
+  if (category === 'Home') {
+    return `${name} is a simple ${frequencyLabel} reset that can make your space feel calmer, cleaner, and easier to enjoy.`;
+  }
+
+  return `${name} is a thoughtful ${frequencyLabel} habit that helps you feel more grounded, clear, and consistent over time.`;
+}
+
+function buildEnglishRecommendationReason(name, category) {
+  if (category === 'Health') {
+    return `Bloomy AI recommends "${name}" because steady physical habits are easier to keep when they feel light, supportive, and realistic on busy days.`;
+  }
+
+  if (category === 'Energy') {
+    return `Bloomy AI suggests "${name}" because a small burst of deliberate action can quickly rebuild momentum and confidence.`;
+  }
+
+  if (category === 'Home') {
+    return `Bloomy AI chose "${name}" because a calmer space often makes the rest of the day feel easier to manage.`;
+  }
+
+  return `Bloomy AI picked "${name}" to help you create a steadier mental rhythm through a habit that feels simple enough to repeat.`;
+}
+
+const translatedHabitNameMap = {
+  'gunde 2l su ic': 'Drink 2L of water',
+  'uyumadan 30 dk once ekran kapat': 'Turn off screens 30 min before sleep',
+  'sabah 5 dk nefes egzersizi': '5 min breathing exercise',
+  'antrenman sonrasi 10 dk esneme': '10 min stretch after workouts',
+  'gunde 8.000 adim hedefi': '8,000 steps a day',
+  'haftada 2 gun kuvvet antrenmani': 'Strength training twice a week',
+  'her gun 10 sayfa oku': 'Read 10 pages a day',
+  'gunde 15 dk yabanci dil': '15 min language practice',
+  'haftalik ogrenme ozeti yaz': 'Write a weekly learning recap',
+  'gune 3 oncelik yazarak basla': 'Start the day with 3 priorities',
+  'pomodoro ile 25 dk odak': '25 min focus with Pomodoro',
+  'aksam 5 dk ertesi gun plani': '5 min next-day plan',
+  'gunluk 3 minnet notu': '3 gratitude notes a day',
+  'aksam 5 dk duygu gunlugu': '5 min evening journal',
+  'haftada 1 dijital detoks saati': '1 digital detox hour a week',
+  'gunde 10 dk yuruyus': '10 min daily walk',
+  'gunluk su takibi': 'Daily water tracking',
+  'gunde 10 sayfa kitap': 'Read 10 pages a day',
+  'uyumadan once 5 dk plan': '5 min plan before sleep',
+};
+
+function translateHabitNameToEnglish(value) {
+  const rawValue = (value || '').trim();
+  if (!rawValue) {
+    return rawValue;
+  }
+
+  const normalizedValue = normalizeSearchText(rawValue)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  return translatedHabitNameMap[normalizedValue] || rawValue;
+}
+
 export function buildHabitCreatePayload(source) {
   if (source?.name) {
+    const translatedName = translateHabitNameToEnglish(source.name);
+    const frequency = source.frequency || 'daily';
+    const category =
+      source.category ||
+      inferCategoryFromText(
+        `${translatedName} ${source.description || ''} ${source.reason || ''}`
+      );
+
     return {
-      name: source.name.trim(),
-      frequency: source.frequency || 'daily',
-      description: source.description || source.reason || '',
-      icon: source.icon || '🌿',
+      name: translatedName,
+      frequency,
+      schedule: source.schedule || getFrequencyLabel(frequency),
+      category,
+      source: source.source || 'ai',
+      description: buildEnglishHabitSummary(translatedName, category, frequency),
+      icon: source.icon || inferIcon(category),
     };
   }
 
-  const title = source?.title?.trim() || '';
+  const title = translateHabitNameToEnglish(source?.title?.trim() || '');
   const schedule = source?.schedule?.trim() || '';
   const category = source?.category?.trim() || 'Mind';
 
   return {
     name: title,
     frequency: source?.frequency || 'daily',
-    description: source?.description || source?.body || schedule,
+    schedule,
+    category,
+    source: source?.source || 'manual',
+    description: source?.description?.trim() || '',
     icon: source?.icon || inferIcon(category),
   };
 }
@@ -149,40 +250,77 @@ function inferIcon(category) {
     return '⚡';
   }
 
+  if (category === 'Learning') {
+    return '📚';
+  }
+
+  if (category === 'Work') {
+    return '💼';
+  }
+
+  if (category === 'Social') {
+    return '🤝';
+  }
+
+  if (category === 'Other') {
+    return '✨';
+  }
+
   return '🌿';
 }
 
 export function mapBackendHabitToUi(habit, options = {}) {
   const streak = options.streak ?? habit.streak_count ?? 0;
-  const checked = Boolean(
-    options.checked ?? habit.completed_today ?? isSameLocalDay(habit.last_completed_at)
-  );
-  const category = inferCategoryFromText(
-    `${habit.name || ''} ${habit.description || ''} ${habit.icon || ''}`
-  );
+  const category =
+    habit.category ||
+    inferCategoryFromText(`${habit.name || ''} ${habit.description || ''} ${habit.icon || ''}`);
   const hydration = isHydrationHabit({
     title: habit.name,
     description: habit.description,
     icon: habit.icon,
     id: habit.habit_id,
   });
+  const source = habit.source || (hydration ? 'system' : 'manual');
+  const fallbackSchedule =
+    source === 'manual' && !habit.schedule && looksLikeScheduleLabel(habit.description)
+      ? habit.description
+      : getFrequencyLabel(habit.frequency);
+  const schedule = habit.schedule || fallbackSchedule;
+  const description =
+    source === 'manual' && !habit.schedule && habit.description === schedule
+      ? ''
+      : habit.description || '';
+  const backendCups = hydration
+    ? isTodayDateKey(habit.water_date)
+      ? Math.max(0, Math.min(WATER_GOAL, Number(habit.water_intake ?? DEFAULT_WATER_CUPS)))
+      : DEFAULT_WATER_CUPS
+    : undefined;
+  const checked = Boolean(
+    options.checked ??
+      (hydration
+        ? (options.cups ?? backendCups ?? DEFAULT_WATER_CUPS) >= WATER_GOAL
+        : habit.completed_today ?? isSameLocalDay(habit.last_completed_at))
+  );
 
   return {
     id: habit.habit_id,
-    title: habit.name,
-    schedule: getFrequencyLabel(habit.frequency),
+    title: translateHabitNameToEnglish(habit.name),
+    schedule,
     category,
     streak,
     progress: getHabitProgress(streak, checked),
     xp: inferXp(streak, checked, options.pointsEarned),
     checked,
     frequency: habit.frequency,
-    description: habit.description || '',
+    description,
     icon: habit.icon || inferIcon(category),
     habitId: habit.habit_id,
+    source,
     variant: hydration ? 'hydration' : 'standard',
     cups: hydration
-      ? options.cups ?? (checked ? WATER_GOAL : DEFAULT_WATER_CUPS)
+      ? options.cups ??
+        backendCups ??
+        (checked ? WATER_GOAL : DEFAULT_WATER_CUPS)
       : undefined,
   };
 }
@@ -193,20 +331,28 @@ export function mapRecommendationToCard(recommendation, index = 0) {
       recommendation.reason || ''
     }`
   );
+  const safeName = translateHabitNameToEnglish(recommendation.name || 'New habit');
+  const frequency = recommendation.frequency || 'daily';
+  const englishDescription = buildEnglishHabitSummary(
+    safeName,
+    fallbackCategory,
+    frequency
+  );
+  const englishReason = buildEnglishRecommendationReason(safeName, fallbackCategory);
 
   return {
-    id: recommendation.id || `${slugify(recommendation.name || 'habit')}-${index}`,
-    title: recommendation.name,
-    body: recommendation.description || recommendation.reason || 'A simple routine to try.',
-    schedule: getFrequencyLabel(recommendation.frequency || 'daily'),
+    id: recommendation.id || `${slugify(safeName || 'habit')}-${index}`,
+    title: safeName,
+    body: englishDescription,
+    schedule: getFrequencyLabel(frequency),
     category: fallbackCategory,
-    xp: recommendation.frequency === 'weekly' ? 15 : 10,
+    xp: frequency === 'weekly' ? 15 : 10,
     artwork: fallbackCategory === 'Home' ? 'desk' : fallbackCategory === 'Mind' ? 'books' : 'stretch',
     icon: recommendation.icon || inferIcon(fallbackCategory),
-    frequency: recommendation.frequency || 'daily',
-    description: recommendation.description || '',
-    reason: recommendation.reason || '',
-    name: recommendation.name,
+    frequency,
+    description: englishDescription,
+    reason: englishReason,
+    name: safeName,
   };
 }
 
@@ -242,21 +388,26 @@ export function getStageLabel(level = 1) {
 }
 
 export function isHydrationHabit(habit) {
-  const normalizedText = normalizeSearchText(
-    `${habit?.id || ''} ${habit?.title || habit?.name || ''} ${habit?.description || ''} ${habit?.icon || ''}`
+  const normalizedId = normalizeSearchText(habit?.id || '');
+  const normalizedTitle = normalizeSearchText(habit?.title || habit?.name || '');
+  const hydrationTrackerPatterns = [
+    'water tracking',
+    'water tracker',
+    'water log',
+    'hydration tracking',
+    'hydration tracker',
+    'hydration log',
+    'su takibi',
+    'su takip',
+  ];
+  const matchesHydrationTrackerName = hydrationTrackerPatterns.some((pattern) =>
+    normalizedTitle.includes(pattern)
   );
-  const tokens = new Set(getSearchTokens(normalizedText));
-  const hasWaterLanguage =
-    normalizedText.includes('drink water') ||
-    normalizedText.includes('su takibi') ||
-    tokens.has('water') ||
-    tokens.has('hydration') ||
-    tokens.has('su');
 
   return (
     habit?.variant === 'hydration' ||
-    habit?.id === 'water' ||
-    hasWaterLanguage
+    normalizedId === 'water' ||
+    matchesHydrationTrackerName
   );
 }
 
@@ -272,4 +423,23 @@ export function getDisplayName(profile) {
   }
 
   return titleCase(email.split('@')[0]);
+}
+
+export function buildAiHabitInsight(habit) {
+  const category = habit?.category || inferCategoryFromText(habit?.title || habit?.name || '');
+  const title = translateHabitNameToEnglish(habit?.title || habit?.name || 'New habit');
+  const baseDescription = buildEnglishHabitSummary(
+    title,
+    category,
+    habit?.frequency || 'daily'
+  );
+  const frequency = habit?.schedule || getFrequencyLabel(habit?.frequency || 'daily');
+
+  return {
+    title,
+    description: `${baseDescription} It is designed to feel achievable from day one, which makes it much easier to keep showing up and turn a good intention into a real routine.`,
+    motivation: buildEnglishRecommendationReason(title, category),
+    frequency,
+    category,
+  };
 }

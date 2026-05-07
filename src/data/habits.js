@@ -1,8 +1,33 @@
 export const WATER_GOAL = 7;
 export const DEFAULT_WATER_CUPS = 2;
 export const HABIT_HISTORY_DAYS = 7;
-export const habitCategories = ['Mind', 'Health', 'Energy', 'Home'];
-export const habitXpOptions = [15, 20, 25, 30];
+export const habitCategories = [
+  'Mind',
+  'Health',
+  'Energy',
+  'Home',
+  'Learning',
+  'Work',
+  'Social',
+  'Other',
+];
+export const MANUAL_HABIT_XP = 10;
+export const manualHabitScheduleOptions = [
+  'After waking up',
+  'Before breakfast',
+  'After breakfast',
+  'Mid-morning',
+  'Before lunch',
+  'After lunch',
+  'Afternoon break',
+  'After work',
+  'Before dinner',
+  'After dinner',
+  'Every evening',
+  'Before sleep',
+  'Between tasks',
+  'Anytime today',
+];
 
 const monthNames = [
   'Jan',
@@ -87,7 +112,9 @@ export function createCustomHabit({
   title,
   schedule,
   category = 'Mind',
-  xp = 20,
+  xp = MANUAL_HABIT_XP,
+  description = '',
+  source = 'manual',
   createdAt = Date.now(),
 }) {
   const safeTitle = title.trim();
@@ -103,6 +130,8 @@ export function createCustomHabit({
     streak: 0,
     progress: 0,
     xp,
+    description,
+    source,
     checked: false,
   };
 }

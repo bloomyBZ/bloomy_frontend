@@ -13,6 +13,10 @@ import {
   getUserStats,
   logoutUser,
   registerUser,
+  undoDeleteHabit,
+  uncompleteHabit,
+  updateHabit,
+  updateUserProfile,
 } from './src/api/bloomyApi';
 import {
   buildHabitCreatePayload,
@@ -31,6 +35,7 @@ import RegisterScreen from './src/screens/RegisterScreen';
 import {
   getDateKey,
   getLevelProgress,
+  WATER_GOAL,
 } from './src/data/habits';
 import { colors } from './src/theme';
 
@@ -92,6 +97,7 @@ export default function App() {
   const [forgotBusy, setForgotBusy] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [recommendationsError, setRecommendationsError] = useState('');
   const [authError, setAuthError] = useState('');
@@ -99,13 +105,25 @@ export default function App() {
   const [forgotError, setForgotError] = useState('');
   const [forgotNotice, setForgotNotice] = useState('');
   const [actionError, setActionError] = useState('');
+  const [actionNotice, setActionNotice] = useState('');
+  const [deletedHabitId, setDeletedHabitId] = useState(null);
   const [evolution, setEvolution] = useState(null);
 
-  const todayKey = useMemo(() => getDateKey(new Date()), []);
+  const [todayKey, setTodayKey] = useState(() => getDateKey(new Date()));
   const habitHistory = useMemo(() => ({ [todayKey]: habits }), [habits, todayKey]);
   const totalXp = stats?.total_points ?? 0;
   const levelProgress = useMemo(() => getLevelProgress(totalXp), [totalXp]);
   const previousLevelRef = useRef(levelProgress.level);
+  const previousTodayKeyRef = useRef(todayKey);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const nextTodayKey = getDateKey(new Date());
+      setTodayKey((current) => (current === nextTodayKey ? current : nextTodayKey));
+    }, 60 * 1000);
+
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     const previousLevel = previousLevelRef.current;
@@ -129,7 +147,10 @@ export default function App() {
     setRecommendations([]);
     setCompletionState({});
     setActionError('');
+    setActionNotice('');
+    setDeletedHabitId(null);
     setRecommendationsError('');
+    setAvatarBusy(false);
   };
 
   const fetchRecommendationCards = async (session) => {
@@ -137,7 +158,7 @@ export default function App() {
       const response = await getHabitRecommendations({
         idToken: session.idToken,
         uid: session.uid,
-        limit: 4,
+        limit: 8,
       });
 
       setRecommendationsError('');
@@ -212,6 +233,22 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (previousTodayKeyRef.current === todayKey) {
+      return;
+    }
+
+    previousTodayKeyRef.current = todayKey;
+    setCompletionState({});
+    setActionNotice('');
+
+    if (authSession) {
+      refreshSessionData(authSession, {}).catch(() => {
+        // Keep the last successful state visible if the background refresh fails.
+      });
+    }
+  }, [todayKey, authSession]);
+
   const goLogin = () => {
     setAuthError('');
     setForgotError('');
@@ -277,25 +314,15 @@ export default function App() {
         display_name: displayName,
       });
 
-      const identity = await signInWithEmailAndPassword(email, password);
-      const session = toSession(identity);
-
-      setAuthSession(session);
       setLoginForm({
         email,
-        password,
+        password: '',
       });
-      await refreshSessionData(session, {});
-      setCompletionState({});
       setRegisterForm(createRegisterForm());
-      setScreen(screens.home);
+      setAuthNotice('Registration complete. You can continue by signing in.');
+      setScreen(screens.login);
     } catch (error) {
       setAuthError(error.message);
-      if (error.message.includes('Firebase Web API key')) {
-        setAuthNotice(
-          'The backend account may have been created, but frontend sign-in still needs a valid Firebase Web API key.'
-        );
-      }
     } finally {
       setAuthBusy(false);
     }
@@ -356,6 +383,7 @@ export default function App() {
 
     setActionBusy(true);
     setActionError('');
+    setActionNotice('');
 
     try {
       await createHabit({
@@ -384,6 +412,7 @@ export default function App() {
 
     setActionBusy(true);
     setActionError('');
+    setActionNotice('');
 
     try {
       await deleteHabit({
@@ -396,8 +425,25 @@ export default function App() {
         delete nextState[habitId];
         return nextState;
       });
-      setHabits((current) => current.filter((habit) => habit.id !== habitId));
-      setRecommendations(await fetchRecommendationCards(authSession));
+      const [nextHabits, nextRecommendations, nextStats, nextPlant] = await Promise.all([
+        fetchHabitsWithStreaks(authSession, {}),
+        fetchRecommendationCards(authSession),
+        getUserStats({
+          idToken: authSession.idToken,
+          uid: authSession.uid,
+        }),
+        getPlant({
+          idToken: authSession.idToken,
+          uid: authSession.uid,
+        }),
+      ]);
+
+      setHabits(nextHabits);
+      setRecommendations(nextRecommendations);
+      setStats(nextStats);
+      setPlant(nextPlant);
+      setDeletedHabitId(habitId);
+      setActionNotice('Habit deleted. You can undo this if you change your mind.');
     } catch (error) {
       setActionError(error.message);
     } finally {
@@ -405,13 +451,14 @@ export default function App() {
     }
   };
 
-  const handleCompleteHabit = async (habitId) => {
+  const handleCompleteHabit = async (habitId, payload = {}) => {
     if (!authSession || actionBusy) {
       return false;
     }
 
     setActionBusy(true);
     setActionError('');
+    setActionNotice('');
 
     try {
       const completion = await completeHabit({
@@ -419,6 +466,7 @@ export default function App() {
         habitId,
         payload: {
           notes: 'Completed from Bloomy mobile app',
+          ...payload,
         },
       });
       const [nextStats, nextPlant, nextStreak] = await Promise.all([
@@ -458,6 +506,8 @@ export default function App() {
                 streak: nextHabitStreak,
                 progress: 100,
                 xp: pointsEarned,
+                cups:
+                  typeof payload.water_intake === 'number' ? payload.water_intake : habit.cups,
               }
             : habit
         )
@@ -469,6 +519,174 @@ export default function App() {
     } catch (error) {
       setActionError(error.message);
       return false;
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleUncompleteHabit = async (habitId) => {
+    if (!authSession || actionBusy) {
+      return false;
+    }
+
+    setActionBusy(true);
+    setActionError('');
+    setActionNotice('');
+
+    try {
+      const uncompletion = await uncompleteHabit({
+        idToken: authSession.idToken,
+        habitId,
+      });
+      const [nextStats, nextPlant, nextHabits] = await Promise.all([
+        getUserStats({
+          idToken: authSession.idToken,
+          uid: authSession.uid,
+        }),
+        getPlant({
+          idToken: authSession.idToken,
+          uid: authSession.uid,
+        }),
+        fetchHabitsWithStreaks(authSession, {}),
+      ]);
+
+      setCompletionState((current) => {
+        const next = { ...current };
+        delete next[habitId];
+        return next;
+      });
+      setStats(nextStats);
+      setPlant(nextPlant);
+      setHabits(nextHabits);
+      if (uncompletion?.points_removed) {
+        setActionNotice(`Habit marked as undone. ${uncompletion.points_removed} XP was removed.`);
+      }
+      return true;
+    } catch (error) {
+      setActionError(error.message);
+      return false;
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleUpdateHabit = async (habitId, payload) => {
+    if (!authSession || actionBusy) {
+      return false;
+    }
+
+    setActionBusy(true);
+    setActionError('');
+    setActionNotice('');
+
+    try {
+      const updatedHabit = await updateHabit({
+        idToken: authSession.idToken,
+        habitId,
+        payload,
+      });
+
+      const isWaterOnlyUpdate =
+        Object.keys(payload || {}).length === 1 && typeof payload.water_intake === 'number';
+
+      if (isWaterOnlyUpdate) {
+        setHabits((current) =>
+          current.map((habit) =>
+            habit.id === habitId
+              ? {
+                  ...habit,
+                  cups:
+                    typeof updatedHabit?.water_intake === 'number'
+                      ? updatedHabit.water_intake
+                      : payload.water_intake,
+                  checked:
+                    typeof updatedHabit?.water_intake === 'number'
+                      ? updatedHabit.water_intake >= WATER_GOAL
+                      : habit.checked,
+                }
+              : habit
+          )
+        );
+      } else {
+        const nextHabits = await fetchHabitsWithStreaks(authSession, completionState);
+        setHabits(nextHabits);
+      }
+
+      return true;
+    } catch (error) {
+      setActionError(error.message);
+      return false;
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleRefreshRecommendations = async () => {
+    if (!authSession || recommendationsLoading) {
+      return;
+    }
+
+    setRecommendationsLoading(true);
+
+    try {
+      const nextRecommendations = await fetchRecommendationCards(authSession);
+      setRecommendations(nextRecommendations);
+    } finally {
+      setRecommendationsLoading(false);
+    }
+  };
+
+  const handleSelectAvatar = async (avatarId) => {
+    if (!authSession || avatarBusy || profile?.avatar_id === avatarId) {
+      return;
+    }
+
+    setAvatarBusy(true);
+    setActionError('');
+    setActionNotice('');
+
+    try {
+      const nextProfile = await updateUserProfile({
+        idToken: authSession.idToken,
+        uid: authSession.uid,
+        payload: {
+          avatar_id: avatarId,
+        },
+      });
+
+      setProfile(nextProfile);
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const handleUndoDeleteHabit = async (habitId) => {
+    if (!authSession || actionBusy || !habitId) {
+      return;
+    }
+
+    setActionBusy(true);
+    setActionError('');
+
+    try {
+      await undoDeleteHabit({
+        idToken: authSession.idToken,
+        habitId,
+      });
+
+      const [nextHabits, nextRecommendations] = await Promise.all([
+        fetchHabitsWithStreaks(authSession, completionState),
+        fetchRecommendationCards(authSession),
+      ]);
+
+      setHabits(nextHabits);
+      setRecommendations(nextRecommendations);
+      setDeletedHabitId(null);
+      setActionNotice('Habit restored successfully.');
+    } catch (error) {
+      setActionError(error.message);
     } finally {
       setActionBusy(false);
     }
@@ -559,6 +777,7 @@ export default function App() {
         email={registerForm.email}
         errorMessage={authError}
         isSubmitting={authBusy}
+        noticeMessage={authNotice}
         onBack={goLogin}
         onChangeConfirmPassword={(confirmPassword) =>
           setRegisterForm((current) => ({ ...current, confirmPassword }))
@@ -586,6 +805,7 @@ export default function App() {
         habitHistory={habitHistory}
         habits={habits}
         onAddHabit={handleAddHabit}
+        onRefreshRecommendations={handleRefreshRecommendations}
         onTabPress={goTab}
         plant={plant}
         profile={profile}
@@ -603,11 +823,17 @@ export default function App() {
       <HabitsScreen
         actionBusy={actionBusy}
         actionError={actionError}
+        actionNotice={actionNotice}
+        deletedHabitId={deletedHabitId}
         habitHistory={habitHistory}
         onAddHabit={handleAddHabit}
         onCompleteHabit={handleCompleteHabit}
         onDeleteHabit={handleDeleteHabit}
         onTabPress={goTab}
+        onUncompleteHabit={handleUncompleteHabit}
+        onUndoDeleteHabit={handleUndoDeleteHabit}
+        onUpdateHabit={handleUpdateHabit}
+        profile={profile}
         todayKey={todayKey}
       />
     );
@@ -616,9 +842,12 @@ export default function App() {
   if (screen === screens.profile) {
     currentScreen = (
       <ProfileScreen
+        actionError={actionError}
+        avatarSaving={avatarBusy}
         habits={habits}
         logoutBusy={logoutBusy}
         onLogout={handleLogout}
+        onSelectAvatar={handleSelectAvatar}
         onTabPress={goTab}
         plant={plant}
         profile={profile}

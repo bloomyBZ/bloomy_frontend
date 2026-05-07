@@ -1,4 +1,5 @@
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, radii } from '../theme';
 
 export default function InputField({
@@ -16,6 +17,9 @@ export default function InputField({
   autoCapitalize = 'none',
   autoCorrect = false,
 }) {
+  const [secureVisible, setSecureVisible] = useState(false);
+  const shouldHideText = secure && !secureVisible;
+
   return (
     <View style={[styles.wrap, style]}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
@@ -27,7 +31,7 @@ export default function InputField({
           onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor="#97918E"
-          secureTextEntry={secure}
+          secureTextEntry={shouldHideText}
           keyboardType={keyboardType}
           editable={editable}
           autoCapitalize={autoCapitalize}
@@ -37,7 +41,17 @@ export default function InputField({
         {right === 'check' ? (
           <CheckIcon />
         ) : null}
-        {right === 'eye' ? <EyeIcon /> : null}
+        {right === 'eye' ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={shouldHideText ? 'Show password' : 'Hide password'}
+            hitSlop={8}
+            onPress={() => setSecureVisible((current) => !current)}
+            style={({ pressed }) => [styles.eyeButton, pressed && styles.pressed]}
+          >
+            <EyeIcon visible={!shouldHideText} />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -52,10 +66,11 @@ function CheckIcon() {
   );
 }
 
-function EyeIcon() {
+function EyeIcon({ visible }) {
   return (
     <View style={styles.eye}>
       <View style={styles.eyeDot} />
+      {!visible ? <View style={styles.eyeSlash} /> : null}
     </View>
   );
 }
@@ -123,7 +138,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.soft,
     borderRadius: 10,
-    marginLeft: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -132,5 +146,20 @@ const styles = StyleSheet.create({
     height: 5,
     borderRadius: 3,
     backgroundColor: colors.soft,
+  },
+  eyeSlash: {
+    position: 'absolute',
+    width: 22,
+    height: 1.5,
+    borderRadius: 2,
+    backgroundColor: colors.soft,
+    transform: [{ rotate: '-32deg' }],
+  },
+  eyeButton: {
+    marginLeft: 8,
+    padding: 2,
+  },
+  pressed: {
+    opacity: 0.72,
   },
 });

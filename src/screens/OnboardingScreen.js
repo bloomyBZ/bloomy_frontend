@@ -1,6 +1,6 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { IconDot, PrimaryButton, SecondaryButton } from '../components/Button';
-import Screen, { HomeIndicator } from '../components/Screen';
+import Screen from '../components/Screen';
 import { colors } from '../theme';
 
 const bloomFlower = require('../../assets/bloomy-docs/bloomy-wbg/stage7nobg.png');
@@ -82,7 +82,6 @@ export default function OnboardingScreen({
           <SecondaryButton title="Skip and Sign Up" onPress={onSkip} />
         ) : null}
       </View>
-      <HomeIndicator />
     </Screen>
   );
 }

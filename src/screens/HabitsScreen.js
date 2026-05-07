@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { isHydrationHabit } from '../api/mappers';
 import AddHabitSheet from '../components/AddHabitSheet';
+import HabitDetailModal from '../components/HabitDetailModal';
 import PageLayout from '../components/PageLayout';
 import { SmallActionButton } from '../components/Button';
 import { DailyHydrationRow, WeeklyHydration } from '../components/HydrationTracker';
@@ -28,6 +29,111 @@ const filters = [
   { key: 'done', label: 'Done' },
 ];
 
+const habitPaletteByCategory = {
+  Health: {
+    surface: '#F4FBFF',
+    border: '#D4EAF6',
+    accent: '#1481C4',
+    accentSoft: '#E8F6FF',
+  },
+  Mind: {
+    surface: '#F8F3FF',
+    border: '#E3D8F8',
+    accent: '#7A56C5',
+    accentSoft: '#F1EAFF',
+  },
+  Energy: {
+    surface: '#FFF8EE',
+    border: '#F4DFC1',
+    accent: '#C47A12',
+    accentSoft: '#FFF1DA',
+  },
+  Home: {
+    surface: '#F3FBF6',
+    border: '#D7ECDC',
+    accent: '#1D8A63',
+    accentSoft: '#E7F6EC',
+  },
+  Learning: {
+    surface: '#F3F7FF',
+    border: '#D9E5FF',
+    accent: '#2A62C9',
+    accentSoft: '#EAF1FF',
+  },
+  Work: {
+    surface: '#FFF6F0',
+    border: '#F0D9CC',
+    accent: '#B45A25',
+    accentSoft: '#FFEBDD',
+  },
+  Social: {
+    surface: '#FFF5F8',
+    border: '#F4D9E3',
+    accent: '#C14D78',
+    accentSoft: '#FFEAF1',
+  },
+  Other: {
+    surface: '#F7F8F9',
+    border: '#DFE4E8',
+    accent: '#5F6B76',
+    accentSoft: '#EEF1F3',
+  },
+};
+
+function getHabitPalette(category) {
+  return habitPaletteByCategory[category] ?? habitPaletteByCategory.Mind;
+}
+
+function useCompletionBurst(token) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!token) {
+      return undefined;
+    }
+
+    scale.setValue(0.985);
+    translateY.setValue(2);
+
+    Animated.parallel([
+      Animated.sequence([
+        Animated.spring(scale, {
+          toValue: 1.025,
+          friction: 6,
+          tension: 110,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scale, {
+          toValue: 1,
+          friction: 7,
+          tension: 90,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.sequence([
+        Animated.timing(translateY, {
+          toValue: -4,
+          duration: 160,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          friction: 7,
+          tension: 80,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+
+    return undefined;
+  }, [scale, token, translateY]);
+
+  return {
+    transform: [{ scale }, { translateY }],
+  };
+}
+
 function getHydrationStateKey(dateKey, habitId) {
   return `${dateKey}:${habitId}`;
 }
@@ -48,15 +154,22 @@ export default function HabitsScreen({
   onAddHabit,
   onDeleteHabit,
   onCompleteHabit,
+  onUncompleteHabit,
+  onUpdateHabit,
+  onUndoDeleteHabit,
   onTabPress,
   actionError,
+  actionNotice,
   actionBusy,
+  profile,
+  deletedHabitId,
 }) {
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [composerVisible, setComposerVisible] = useState(false);
   const [celebrationTarget, setCelebrationTarget] = useState(null);
   const [hydrationCupsByDate, setHydrationCupsByDate] = useState({});
+  const [selectedHabitDetail, setSelectedHabitDetail] = useState(null);
   const dateSliderRef = useRef(null);
 
   const dateOptions = useMemo(
@@ -71,12 +184,24 @@ export default function HabitsScreen({
         })),
     [habitHistory, todayKey]
   );
+  const habits = habitHistory[selectedDateKey] ?? habitHistory[todayKey] ?? [];
 
   useEffect(() => {
     if (!habitHistory[selectedDateKey] && habitHistory[todayKey]) {
       setSelectedDateKey(todayKey);
     }
   }, [habitHistory, selectedDateKey, todayKey]);
+
+  useEffect(() => {
+    if (!selectedHabitDetail) {
+      return;
+    }
+
+    const nextSelectedHabit = habits.find((habit) => habit.id === selectedHabitDetail.id);
+    if (nextSelectedHabit) {
+      setSelectedHabitDetail(nextSelectedHabit);
+    }
+  }, [habits, selectedHabitDetail]);
 
   useEffect(() => {
     setHydrationCupsByDate((current) => {
@@ -99,24 +224,42 @@ export default function HabitsScreen({
       return changed ? next : current;
     });
   }, [habitHistory]);
-
-  const habits = habitHistory[selectedDateKey] ?? habitHistory[todayKey] ?? [];
+  const celebratingHabitId =
+    celebrationTarget?.dateKey === selectedDateKey ? celebrationTarget.habitId : null;
   const completedCount = getCompletedCount(habits);
   const earnedXp = getEarnedXp(habits);
   const availableXp = getAvailableXp(habits);
   const selectedDateTitle = formatHabitDate(selectedDateKey);
   const selectedDateMeta = formatRelativeHabitDate(selectedDateKey, todayKey);
+  const sortedHabits = useMemo(
+    () =>
+      [...habits].sort((first, second) => {
+        const firstChecked = Number(first.checked && first.id !== celebratingHabitId);
+        const secondChecked = Number(second.checked && second.id !== celebratingHabitId);
+        const doneDifference = firstChecked - secondChecked;
+        if (doneDifference !== 0) {
+          return doneDifference;
+        }
+
+        return first.title.localeCompare(second.title);
+      }),
+    [celebratingHabitId, habits]
+  );
   const filteredHabits = useMemo(() => {
     if (selectedFilter === 'active') {
-      return habits.filter((habit) => !habit.checked);
+      return sortedHabits.filter(
+        (habit) => !(habit.checked && habit.id !== celebratingHabitId)
+      );
     }
 
     if (selectedFilter === 'done') {
-      return habits.filter((habit) => habit.checked);
+      return sortedHabits.filter(
+        (habit) => habit.checked && habit.id !== celebratingHabitId
+      );
     }
 
-    return habits;
-  }, [habits, selectedFilter]);
+    return sortedHabits;
+  }, [celebratingHabitId, selectedFilter, sortedHabits]);
   const sectionMetaLabel =
     selectedFilter === 'all'
       ? `${filteredHabits.length} habits`
@@ -147,20 +290,30 @@ export default function HabitsScreen({
   };
 
   const handleToggleHabit = async (habit) => {
-    if (habit.checked || actionBusy) {
+    if (actionBusy) {
       return;
     }
 
-    const result = await onCompleteHabit?.(habit.id);
+    const result = habit.checked
+      ? await onUncompleteHabit?.(habit.id)
+      : await onCompleteHabit?.(habit.id);
 
     if (result !== false) {
-      if (isHydrationHabit(habit)) {
+      if (!habit.checked && isHydrationHabit(habit)) {
         setHydrationCupsByDate((current) => ({
           ...current,
           [getHydrationStateKey(selectedDateKey, habit.id)]: WATER_GOAL,
         }));
       }
-      triggerCelebration(habit.id);
+      if (habit.checked) {
+        setHydrationCupsByDate((current) => ({
+          ...current,
+          [getHydrationStateKey(selectedDateKey, habit.id)]:
+            isHydrationHabit(habit) ? DEFAULT_WATER_CUPS : current[getHydrationStateKey(selectedDateKey, habit.id)],
+        }));
+      } else {
+        triggerCelebration(habit.id);
+      }
     }
   };
 
@@ -172,20 +325,36 @@ export default function HabitsScreen({
     const stateKey = getHydrationStateKey(selectedDateKey, habit.id);
     const previousCups = getHydrationCups(habit, hydrationCupsByDate, selectedDateKey);
 
-    if (habit.checked) {
-      return;
-    }
-
     setHydrationCupsByDate((current) => ({
       ...current,
       [stateKey]: nextCups,
     }));
 
-    if (nextCups < WATER_GOAL) {
+    const persisted = await onUpdateHabit?.(habit.id, {
+      water_intake: nextCups,
+    });
+
+    if (persisted === false) {
+      setHydrationCupsByDate((current) => ({
+        ...current,
+        [stateKey]: previousCups,
+      }));
       return;
     }
 
-    const result = await onCompleteHabit?.(habit.id);
+    if (nextCups < WATER_GOAL) {
+      if (habit.checked) {
+        await onUncompleteHabit?.(habit.id);
+        await onUpdateHabit?.(habit.id, {
+          water_intake: nextCups,
+        });
+      }
+      return;
+    }
+
+    const result = await onCompleteHabit?.(habit.id, {
+      water_intake: nextCups,
+    });
 
     if (result !== false) {
       setHydrationCupsByDate((current) => ({
@@ -196,6 +365,9 @@ export default function HabitsScreen({
       return;
     }
 
+    await onUpdateHabit?.(habit.id, {
+      water_intake: previousCups,
+    });
     setHydrationCupsByDate((current) => ({
       ...current,
       [stateKey]: previousCups,
@@ -226,17 +398,47 @@ export default function HabitsScreen({
     onDeleteHabit?.(selectedDateKey, habitId);
   };
 
+  const handleSaveHabitDescription = async (habitId, description) => {
+    const saved = await onUpdateHabit?.(habitId, {
+      description,
+    });
+
+    if (saved !== false) {
+      setSelectedHabitDetail((current) =>
+        current?.id === habitId ? { ...current, description } : current
+      );
+    }
+
+    return saved;
+  };
+
   return (
     <>
       <PageLayout
         title="Habits"
         subtitle={selectedDateTitle}
         activeTab="habits"
+        avatarFallbackText={(profile?.display_name || 'B').charAt(0).toUpperCase()}
+        avatarId={profile?.avatar_id}
         onTabPress={onTabPress}
         scroll
         contentStyle={styles.content}
       >
         <NoticeBanner message={actionError} tone="error" style={styles.notice} />
+        {actionNotice ? (
+          <View style={styles.undoCard}>
+            <Text style={styles.undoText}>{actionNotice}</Text>
+            {deletedHabitId ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => onUndoDeleteHabit?.(deletedHabitId)}
+                style={({ pressed }) => [styles.undoButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.undoButtonText}>Undo</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.dateCard}>
           <Text style={styles.dateEyebrow}>Habit history</Text>
@@ -371,6 +573,7 @@ export default function HabitsScreen({
               }
               onChange={(nextCups) => handleWaterChange(habit, nextCups)}
               onDelete={() => handleDeleteHabit(habit.id)}
+              onOpenDetail={() => setSelectedHabitDetail(habit)}
               onToggle={() => handleToggleHabit(habit)}
             />
           ) : (
@@ -389,6 +592,7 @@ export default function HabitsScreen({
                 )
               }
               onDelete={() => handleDeleteHabit(habit.id)}
+              onOpenDetail={() => setSelectedHabitDetail(habit)}
               onToggle={() => handleToggleHabit(habit)}
             />
           )
@@ -401,6 +605,45 @@ export default function HabitsScreen({
         onSubmit={handleAddHabit}
         visible={composerVisible}
       />
+
+      <HabitDetailModal
+        habit={selectedHabitDetail}
+        onClose={() => setSelectedHabitDetail(null)}
+        onSaveDescription={handleSaveHabitDescription}
+        onToggleComplete={() => {
+          if (!selectedHabitDetail) {
+            return;
+          }
+
+          if (selectedHabitDetail.checked) {
+            onUncompleteHabit?.(selectedHabitDetail.id);
+            if (isHydrationHabit(selectedHabitDetail)) {
+              setHydrationCupsByDate((current) => ({
+                ...current,
+                [getHydrationStateKey(selectedDateKey, selectedHabitDetail.id)]:
+                  DEFAULT_WATER_CUPS,
+              }));
+            }
+          } else {
+            onCompleteHabit?.(
+              selectedHabitDetail.id,
+              isHydrationHabit(selectedHabitDetail)
+                ? { water_intake: WATER_GOAL }
+                : undefined
+            );
+            if (isHydrationHabit(selectedHabitDetail)) {
+              setHydrationCupsByDate((current) => ({
+                ...current,
+                [getHydrationStateKey(selectedDateKey, selectedHabitDetail.id)]:
+                  WATER_GOAL,
+              }));
+            }
+          }
+          setSelectedHabitDetail(null);
+        }}
+        primaryDisabled={actionBusy}
+        visible={Boolean(selectedHabitDetail)}
+      />
     </>
   );
 }
@@ -412,12 +655,23 @@ function WaterHabitRow({
   onCelebrateDone,
   onChange,
   onDelete,
+  onOpenDetail,
   onToggle,
 }) {
   const checked = cups >= WATER_GOAL;
+  const palette = getHabitPalette(habit.category);
+  const burstMotion = useCompletionBurst(celebrationToken);
 
   return (
-    <View style={[styles.habitCard, styles.waterCard, checked && styles.waterCardDone]}>
+    <Animated.View
+      style={[
+        styles.habitCard,
+        styles.waterCard,
+        { backgroundColor: palette.surface, borderColor: palette.border },
+        checked && styles.habitCardDone,
+        burstMotion,
+      ]}
+    >
       <Pressable
         accessibilityRole="checkbox"
         accessibilityState={{ checked }}
@@ -433,24 +687,37 @@ function WaterHabitRow({
 
       <View style={styles.habitContent}>
         <View style={styles.cardBody}>
-          <View style={styles.cardMain}>
-            <HabitInfo
-              done={checked}
-              habit={habit}
-              subtitle={`${cups}/${WATER_GOAL} glasses logged`}
-            />
-          </View>
+          <Pressable
+            onPress={onOpenDetail}
+            style={({ pressed }) => [
+              styles.cardMain,
+              styles.cardMainTouchable,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={[styles.cardAccent, { backgroundColor: palette.accent }]} />
+            <View style={styles.cardCopy}>
+              <HabitInfo
+                done={checked}
+                habit={habit}
+                palette={palette}
+                subtitle={`${cups}/${WATER_GOAL} glasses logged`}
+              />
+            </View>
+          </Pressable>
 
-          <View style={styles.cardRail}>
+          <View style={styles.cardSideActions}>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={`Delete ${habit.title}`}
               onPress={onDelete}
               style={({ pressed }) => [
-                styles.deleteButton,
+                styles.iconButton,
+                styles.deleteIconButton,
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.deleteButtonText}>Delete</Text>
+              <Text style={styles.deleteIconText}>×</Text>
             </Pressable>
             <CelebrationPocket
               active={checked}
@@ -461,15 +728,26 @@ function WaterHabitRow({
           </View>
         </View>
 
+        <View style={styles.cardDivider} />
         <DailyHydrationRow cups={cups} onChange={onChange} />
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
-function HabitRow({ habit, celebrationToken, onCelebrateDone, onDelete, onToggle }) {
+function HabitRow({ habit, celebrationToken, onCelebrateDone, onDelete, onOpenDetail, onToggle }) {
+  const palette = getHabitPalette(habit.category);
+  const burstMotion = useCompletionBurst(celebrationToken);
+
   return (
-    <View style={[styles.habitCard, habit.checked && styles.habitCardDone]}>
+    <Animated.View
+      style={[
+        styles.habitCard,
+        { backgroundColor: palette.surface, borderColor: palette.border },
+        habit.checked && styles.habitCardDone,
+        burstMotion,
+      ]}
+    >
       <Pressable
         accessibilityRole="checkbox"
         accessibilityState={{ checked: habit.checked }}
@@ -485,24 +763,37 @@ function HabitRow({ habit, celebrationToken, onCelebrateDone, onDelete, onToggle
 
       <View style={styles.habitContent}>
         <View style={styles.cardBody}>
-          <View style={styles.cardMain}>
-            <HabitInfo
-              done={habit.checked}
-              habit={habit}
-              subtitle={habit.schedule}
-            />
-          </View>
+          <Pressable
+            onPress={onOpenDetail}
+            style={({ pressed }) => [
+              styles.cardMain,
+              styles.cardMainTouchable,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={[styles.cardAccent, { backgroundColor: palette.accent }]} />
+            <View style={styles.cardCopy}>
+              <HabitInfo
+                done={habit.checked}
+                habit={habit}
+                palette={palette}
+                subtitle={habit.schedule}
+              />
+            </View>
+          </Pressable>
 
-          <View style={styles.cardRail}>
+          <View style={styles.cardSideActions}>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={`Delete ${habit.title}`}
               onPress={onDelete}
               style={({ pressed }) => [
-                styles.deleteButton,
+                styles.iconButton,
+                styles.deleteIconButton,
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.deleteButtonText}>Delete</Text>
+              <Text style={styles.deleteIconText}>×</Text>
             </Pressable>
             <CelebrationPocket
               active={habit.checked}
@@ -513,17 +804,17 @@ function HabitRow({ habit, celebrationToken, onCelebrateDone, onDelete, onToggle
           </View>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
-function HabitInfo({ habit, subtitle, done }) {
+function HabitInfo({ habit, subtitle, done, palette }) {
   return (
     <>
       <View style={styles.habitHeader}>
         <Text
           style={[styles.habitTitle, done && styles.habitTitleDone]}
-          numberOfLines={1}
+          numberOfLines={2}
         >
           {habit.title}
         </Text>
@@ -532,13 +823,24 @@ function HabitInfo({ habit, subtitle, done }) {
       <Text style={styles.habitSchedule}>{subtitle}</Text>
 
       <View style={styles.habitMetaRow}>
-        <View style={styles.categoryPill}>
-          <Text style={styles.categoryText}>{habit.category}</Text>
+        <View style={[styles.categoryPill, { backgroundColor: palette.accentSoft }]}>
+          <Text style={[styles.categoryText, { color: palette.accent }]}>{habit.category}</Text>
         </View>
         <View style={styles.xpPill}>
           <Text style={styles.xpText}>+{habit.xp} XP</Text>
         </View>
-        <Text style={styles.streakText}>{habit.streak} day streak</Text>
+        <View style={styles.streakPill}>
+          <Text style={styles.streakText}>{habit.streak} day streak</Text>
+        </View>
+      </View>
+
+      <View style={styles.habitFootRow}>
+        <Text style={styles.habitHint}>
+          {done ? 'Completed and counted for today.' : 'Tap the card for the full habit view.'}
+        </Text>
+        <View style={styles.openBubble}>
+          <Text style={styles.openBubbleText}>›</Text>
+        </View>
       </View>
     </>
   );
@@ -597,7 +899,7 @@ function CelebrationPocket({ active, token, xp, onDone }) {
 
     const timeoutId = setTimeout(() => {
       onDone?.(token);
-    }, 1350);
+    }, 1700);
 
     return () => clearTimeout(timeoutId);
   }, [token]);
@@ -683,6 +985,38 @@ const styles = StyleSheet.create({
   },
   notice: {
     marginBottom: 14,
+  },
+  undoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderRadius: radii.card,
+    backgroundColor: '#EDF8F0',
+    borderWidth: 1,
+    borderColor: '#C8E5D0',
+    padding: 14,
+    marginBottom: 14,
+  },
+  undoText: {
+    flex: 1,
+    color: '#2E6E45',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  undoButton: {
+    minHeight: 34,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DFF3E5',
+  },
+  undoButtonText: {
+    color: colors.greenDark,
+    fontSize: 12,
+    fontWeight: '900',
   },
   dateCard: {
     borderRadius: radii.card,
@@ -836,31 +1170,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   waterCard: {
-    borderRadius: radii.card,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    marginBottom: 12,
-    ...shadow,
-  },
-  waterCardDone: {
-    borderColor: '#BDE8F8',
-    backgroundColor: '#FAFDFF',
+    minHeight: 166,
   },
   habitCard: {
-    minHeight: 128,
+    minHeight: 150,
     borderRadius: radii.card,
-    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
     flexDirection: 'row',
-    padding: 14,
+    padding: 15,
     marginBottom: 12,
     ...shadow,
   },
   habitCardDone: {
-    backgroundColor: '#FBFDFC',
     borderColor: '#CAE8D9',
   },
   checkButton: {
@@ -907,80 +1228,93 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'flex-start',
   },
   cardMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardMainTouchable: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  cardAccent: {
+    width: 6,
+    borderRadius: 999,
+    marginRight: 12,
+  },
+  cardCopy: {
     flex: 1,
     minWidth: 0,
   },
   habitHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
   habitTitle: {
     flex: 1,
     color: colors.ink,
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: '800',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
   },
   habitTitleDone: {
     color: colors.muted,
   },
-  cardRail: {
-    width: 82,
+  cardSideActions: {
+    width: 74,
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginLeft: 10,
-    paddingTop: 1,
+    marginLeft: 12,
   },
-  deleteButton: {
-    minHeight: 28,
-    minWidth: 72,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+  iconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFF1F1',
     borderWidth: 1,
     borderColor: '#F4D0D0',
+    backgroundColor: '#FFF4F4',
   },
-  deleteButtonText: {
+  deleteIconButton: {
+    marginTop: 2,
+  },
+  deleteIconText: {
     color: colors.danger,
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '700',
   },
   habitSchedule: {
     color: colors.muted,
     fontSize: 13,
-    lineHeight: 18,
-    marginTop: 3,
+    lineHeight: 19,
+    marginTop: 6,
   },
   habitMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
     marginTop: 12,
-    marginBottom: 6,
   },
   categoryPill: {
-    minHeight: 24,
-    borderRadius: 8,
-    paddingHorizontal: 9,
+    minHeight: 26,
+    borderRadius: 999,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.greenSoft,
   },
   categoryText: {
-    color: colors.greenDark,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   xpPill: {
-    minHeight: 24,
-    borderRadius: 8,
-    paddingHorizontal: 9,
+    minHeight: 26,
+    borderRadius: 999,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFF4D7',
@@ -988,12 +1322,78 @@ const styles = StyleSheet.create({
   xpText: {
     color: '#85620D',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '900',
+  },
+  streakPill: {
+    minHeight: 26,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F4F7F5',
   },
   streakText: {
     color: colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  statePill: {
+    minHeight: 28,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  statePillDone: {
+    backgroundColor: '#E8F7EE',
+    borderColor: '#CBE8D5',
+  },
+  statePillPending: {
+    borderColor: 'transparent',
+  },
+  statePillText: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  statePillTextDone: {
+    color: colors.greenDark,
+  },
+  habitFootRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 14,
+  },
+  habitHint: {
+    flex: 1,
+    color: colors.muted,
     fontSize: 12,
+    lineHeight: 17,
+  },
+  openBubble: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D9E4DE',
+  },
+  openBubbleText: {
+    color: colors.greenDark,
+    fontSize: 22,
+    lineHeight: 22,
     fontWeight: '700',
+    marginTop: -2,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: '#DDE7E1',
+    marginTop: 14,
+    marginBottom: 12,
   },
   emptyState: {
     borderRadius: radii.card,
